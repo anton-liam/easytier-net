@@ -1,13 +1,13 @@
-# 001 Full Tunnel Exit MVP Plan
+# 001 Gateway Full Tunnel MVP Plan
 
 ## 基于 Spec
 
 - `docs/specs/001-product-scope.zh.md`
-- `docs/specs/002-full-tunnel-exit-policy.zh.md`
+- `docs/specs/002-gateway-full-tunnel-policy.zh.md`
 
 ## 目标
 
-实现最小可运行的 full tunnel 出口策略闭环：Web 可选择任意 source/exit 节点，Agent 可安全应用 source 默认路由和 exit forwarding/NAT，切换过程中不丢失 Web/control-plane 连接。
+实现最小可运行的 gateway full tunnel 出口策略闭环：Web 可选择任意 source R3S 和 exit R3S，Agent 可安全接管 source LAN/Wi-Fi 下游设备流量并经 exit forwarding/NAT 异地出口，切换过程中不丢失 Web/control-plane 连接。
 
 ## 阶段 1：整理 fork 工作区
 
@@ -60,12 +60,12 @@ git commit -m "chore: support fork refs for vendor sync"
 
 1. 创建 Rust crate `easytier-agent`。
 2. 定义 policy model：
-   - `FullTunnelExitPolicy`
+   - `GatewayFullTunnelPolicy`
    - `DevicePolicy`
    - `DevicePolicyRole`
    - `PolicyStatus`
 3. 定义 dry-run plan：
-   - source route plan
+   - source LAN CIDR policy route plan
    - exit forwarding/NAT plan
    - control-plane protected route plan
 4. 添加单元测试。
@@ -81,7 +81,7 @@ cargo test -p easytier-agent
 
 - policy JSON 可反序列化。
 - source/exit device policy 校验通过。
-- machine_id 不匹配、source=exit、缺少 exit peer 等错误能失败。
+- machine_id 不匹配、source=exit、缺少 source_lan_cidr、缺少 exit peer 等错误能失败。
 - dry-run plan 输出明确动作，不执行系统命令。
 
 提交建议：
@@ -89,7 +89,7 @@ cargo test -p easytier-agent
 ```sh
 cd vendor/EasyTier
 git add Cargo.toml easytier-agent
-git commit -m "feat(agent): add full tunnel policy planner"
+git commit -m "feat(agent): add gateway full tunnel policy planner"
 ```
 
 ## 阶段 3：实现 Linux backend
@@ -105,11 +105,11 @@ git commit -m "feat(agent): add full tunnel policy planner"
 
 1. 实现 `PlatformBackend` trait。
 2. Linux backend 支持：
-   - 查询默认路由。
+   - 查询默认路由和 source LAN CIDR。
    - 添加 protected host route。
-   - 替换 source default route。
+   - 替换 source LAN CIDR policy route。
    - 开启 IPv4 forwarding。
-   - 添加 nftables masquerade/forwarding 规则。
+   - 添加针对 source LAN CIDR 的 nftables masquerade/forwarding 规则。
    - 删除指定 source 的 nftables 规则。
 3. 所有 apply 操作先支持 `--dry-run`。
 4. 增加幂等测试。
@@ -132,7 +132,7 @@ cargo test -p easytier-agent
 ```sh
 cd vendor/EasyTier
 git add easytier-agent
-git commit -m "feat(agent): implement linux full tunnel backend"
+git commit -m "feat(agent): implement linux gateway full tunnel backend"
 ```
 
 ## 阶段 4：实现 control-plane 保护和 rollback
@@ -152,7 +152,7 @@ git commit -m "feat(agent): implement linux full tunnel backend"
 3. 保存 last known good route snapshot。
 4. 添加 protected route。
 5. 验证 control-plane 可达。
-6. 执行 default route 切换。
+6. 执行 source LAN CIDR policy route 切换。
 7. 再次验证 control-plane。
 8. 失败时回滚到 snapshot。
 
@@ -208,7 +208,7 @@ make lab-down
 
 预期结果：
 
-- `node-a -> node-b` 生效。
+- `node-a` LAN 测试客户端经 `node-b` 出口生效。
 - `node-a -> node-c` 切换期间 Web/control-plane 检查不中断超过阈值。
 - 停用策略后恢复 last known good。
 - 不可达 exit 策略进入 `degraded` 或 `rollbacked`。
@@ -217,7 +217,7 @@ make lab-down
 
 ```sh
 git add tests/lab Makefile
-git commit -m "test: add full tunnel exit lab checks"
+git commit -m "test: add gateway full tunnel exit lab checks"
 ```
 
 ## 阶段 6：Web policy/report API MVP
@@ -234,7 +234,7 @@ git commit -m "test: add full tunnel exit lab checks"
 
 1. 新增 policy 表或复用现有存储时增加明确 source/exit policy model。
 2. 新增 API：
-   - 创建/更新 full tunnel policy。
+   - 创建/更新 gateway full tunnel policy。
    - 启用/停用 policy。
    - 查询 desired/observed state。
    - 接收 runtime report。
@@ -259,7 +259,7 @@ cargo test -p easytier-web
 ```sh
 cd vendor/EasyTier
 git add easytier-web
-git commit -m "feat(web): add full tunnel policy api"
+git commit -m "feat(web): add gateway full tunnel policy api"
 ```
 
 ## 阶段 7：OpenWrt backend 和 LuCI MVP
@@ -304,4 +304,3 @@ make build TARGET=nanopi-r3s
 git add targets/nanopi-r3s
 git commit -m "build: wire nanopi r3s agent package target"
 ```
-

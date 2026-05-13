@@ -2,9 +2,9 @@
 
 ## 要解决的问题
 
-本阶段要把 EasyTier 从“节点可组网”推进到“Web 控制台可管理任意节点之间的全量出口转发”。
+本阶段要把 EasyTier 从“节点可组网”推进到“Web 控制台可管理任意 R3S 网关之间的下游设备全量出口转发”。
 
-Web 控制台必须能在同一 EasyTier 网络内选择任意一个 source 节点和任意一个 exit 节点，创建、启用、停用、切换 full tunnel 出口策略。策略启用后，source 节点的默认出口流量经 EasyTier 网络转发到 exit 节点，由 exit 节点通过系统 forwarding/NAT 出口。
+Web 控制台必须能在同一 EasyTier 网络内选择任意一个 source R3S 和任意一个 exit R3S，创建、启用、停用、切换 gateway full tunnel 出口策略。策略启用后，接入 source R3S LAN/Wi-Fi 的下游设备流量经 EasyTier 网络转发到 exit R3S，由 exit R3S 通过系统 forwarding/NAT 从异地 WAN 出口发出。
 
 ## 不解决的问题
 
@@ -26,11 +26,11 @@ Web 控制台必须能在同一 EasyTier 网络内选择任意一个 source 节�
 
 典型场景：
 
-- 管理员在 Web 控制台选择 `node-a -> node-b`，让 `node-a` 的所有出口流量走 `node-b`。
+- 管理员在 Web 控制台选择 `node-a -> node-b`，让接入 `node-a` LAN/Wi-Fi 的电脑、手机、下级 Wi-Fi 路由器等设备流量走 `node-b` 异地出口。
 - 管理员实时切换为 `node-a -> node-c`。
-- 管理员停用 `node-a` 的出口转发策略。
+- 管理员停用 `node-a` 的网关出口转发策略。
 - 多个 source 节点同时使用同一个 exit 节点。
-- 节点切换出口时，Agent 仍能保持与 Web 控制台、config-server、relay 的控制面连接。
+- 节点切换出口时，source R3S 自身仍能保持与 Web 控制台、config-server、relay 的控制面连接。
 
 ## 当前系统边界
 
@@ -51,11 +51,11 @@ Web 控制台必须能在同一 EasyTier 网络内选择任意一个 source 节�
 
 本阶段必须实现：
 
-- Web 创建 logical policy：`full_tunnel_exit`。
+- Web 创建 logical policy：`gateway_full_tunnel`。
 - Web 将 logical policy 拆成两个 device policy：
-  - source 节点：`client_exit_via_peer`
-  - exit 节点：`provide_exit_for_peer`
-- Agent 执行 source 节点默认路由切换。
+  - source 节点：`client_gateway_via_peer`
+  - exit 节点：`provide_exit_for_gateway`
+- Agent 在 source R3S 上对指定 LAN CIDR 执行网关策略路由切换。
 - Agent 执行 exit 节点 forwarding/NAT。
 - Agent 在修改默认路由前保护 control-plane underlay route。
 - Agent 上报 runtime report 和 policy apply result。
@@ -64,11 +64,13 @@ Web 控制台必须能在同一 EasyTier 网络内选择任意一个 source 节�
 
 ## 稳定性原则
 
-控制面流量永远不能被 full tunnel 策略劫持。
+控制面流量永远不能被 gateway full tunnel 策略劫持。
 
-Agent 修改 default route、policy route、firewall/NAT 前，必须先建立 control-plane protected routes。若无法确认 Web/control-plane 可达，禁止应用 full tunnel 策略。
+Agent 修改 default route、policy route、firewall/NAT 前，必须先建立 control-plane protected routes。若无法确认 Web/control-plane 可达，禁止应用 gateway full tunnel 策略。
 
 切换策略后必须再次验证 Web/control-plane 可达。验证失败时必须回滚到 last known good 状态。
+
+source R3S 自身的控制面连接优先保持原 underlay 出口。MVP 接管的是 source R3S 下游 LAN CIDR 的出口流量，不要求接管 source R3S 自身的全部系统流量。
 
 ## 转发实现边界
 
@@ -87,6 +89,7 @@ Web 控制台必须展示：
 
 - logical policy desired source/exit 节点。
 - source 节点 observed exit 节点。
+- source LAN CIDR。
 - exit 节点 observed provider 状态。
 - policy version。
 - source apply result。
@@ -99,9 +102,8 @@ Web 控制台必须展示：
 
 containerlab 至少验证：
 
-- 创建 `node-a -> node-b` 策略后，`node-a` 默认出口走 `node-b`。
+- 创建 `node-a -> node-b` 策略后，接入 `node-a` LAN CIDR 的测试客户端出口走 `node-b`。
 - 切换 `node-a -> node-c` 时，`node-a` 和 Web 控制台的连接不中断超过设定阈值。
-- 停用策略后，`node-a` 删除 full tunnel 默认路由并恢复 last known good 状态。
+- 停用策略后，`node-a` 删除 gateway full tunnel 策略路由和 forwarding 规则，并恢复 last known good 状态。
 - 下发不可达 exit 节点时，`node-a` 不失联，策略进入 `degraded` 或 `rollbacked`。
 - 多个 source 使用同一个 exit 时，停用其中一个 source 不影响其它 source 的 NAT/forwarding。
-

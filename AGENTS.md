@@ -209,20 +209,20 @@ platform/linux       systemd, nftables, iproute2
 
 第一阶段流量转发必须基于系统路由、EasyTier 网络能力、OpenWrt `fw4`/`nftables` 和 Linux `iproute2` 实现。
 
-OpenWrt/iStoreOS 上不得将基础出口转发能力绑定到 OpenClash。OpenClash 只能作为后续高级规则分流、透明代理、订阅规则、DNS 策略增强的可选集成，不能作为 `full_tunnel_exit` 的基础依赖。
+OpenWrt/iStoreOS 上不得将基础出口转发能力绑定到 OpenClash。OpenClash 只能作为后续高级规则分流、透明代理、订阅规则、DNS 策略增强的可选集成，不能作为 `gateway_full_tunnel` 的基础依赖。
 
 基础出口转发模型：
 
 ```text
 source 节点:
   保护 Web/control-plane underlay route
-  default route 指向 exit 节点的 EasyTier IPv4
-  上报 route 和 healthcheck 状态
+  对 source LAN CIDR 建立到 exit 节点 EasyTier IPv4 的策略路由
+  上报 route、source LAN CIDR 和 healthcheck 状态
 
 exit 节点:
   开启 IPv4 forwarding
   允许 easytier interface 到 WAN forwarding
-  对来自 EasyTier 网段的出口流量做 masquerade/NAT
+  对来自 source LAN CIDR 的出口流量做 masquerade/NAT
   上报 firewall、NAT 和出口 healthcheck 状态
 ```
 
@@ -258,27 +258,28 @@ Policy 必须包含：
 第一阶段必须支持 logical policy：
 
 ```text
-full_tunnel_exit
+gateway_full_tunnel
 ```
 
-该策略用于让任意 source 节点的默认出口流量经任意 exit 节点转发。
+该策略用于让任意 source R3S 网关下游 LAN/Wi-Fi 设备的出口流量经任意 exit R3S 节点异地转发。
 
-Web 必须将 `full_tunnel_exit` 拆成两个 device policy：
+Web 必须将 `gateway_full_tunnel` 拆成两个 device policy：
 
 ```text
-client_exit_via_peer
-provide_exit_for_peer
+client_gateway_via_peer
+provide_exit_for_gateway
 ```
 
-`full_tunnel_exit` 必须支持：
+`gateway_full_tunnel` 必须支持：
 
 - 指定 exit peer 的 EasyTier IPv4。
+- 指定 source LAN CIDR。
 - 保护 Web/control-plane underlay route。
 - 检查 EasyTier interface。
 - 检查 peer 可达性。
-- 在 source 节点上应用默认路由。
-- 在 exit 节点上应用 forwarding/NAT。
-- 一个 source 同一时间只能启用一个 full tunnel exit。
+- 在 source 节点上对 source LAN CIDR 应用策略路由。
+- 在 exit 节点上对 source LAN CIDR 应用 forwarding/NAT。
+- 一个 source 同一时间只能启用一个 gateway full tunnel exit。
 - 一个 exit 可以服务多个 source。
 - 验证出口可用。
 - 失败时回滚。
@@ -295,6 +296,7 @@ Agent 必须周期性上报节点状态。最小状态包括：
 - 当前 policy id/version/status
 - EasyTier interface 状态
 - 默认路由
+- source LAN CIDR 策略路由
 - control-plane 保护路由
 - firewall backend
 - forwarding/NAT 状态
@@ -349,8 +351,8 @@ Web UI 必须至少能表达：
 containerlab 测试必须覆盖：
 
 - Web、node-a、node-b、node-c 节点启动。
-- Web 下发任意 source 经任意 exit 的 full tunnel 策略。
-- source 默认路由切换到 exit。
+- Web 下发任意 source 经任意 exit 的 gateway full tunnel 策略。
+- source LAN CIDR 策略路由切换到 exit。
 - source 从一个 exit 实时切换到另一个 exit。
 - Web/control-plane underlay route 未被默认路由捕获。
 - 当前 exit 断开后 source 状态进入 degraded 或 rollback。
@@ -396,12 +398,12 @@ OPENWRT_PROFILE=friendlyarm_nanopi-r3s
 
 开发 LuCI fork 时，必须优先参考 `luci-app-easytier` 现有结构和 OpenWrt 常规包范式，不引入与 LuCI 体系不一致的前端框架或服务管理方式。
 
-开发 Agent 时，第一阶段只实现 `full_tunnel_exit` 所需的最小能力：
+开发 Agent 时，第一阶段只实现 `gateway_full_tunnel` 所需的最小能力：
 
 - policy 解析。
 - policy 校验。
 - dry-run plan。
-- source 节点默认路由切换。
+- source 网关策略路由切换。
 - exit 节点 forwarding/NAT。
 - control-plane protected route。
 - verify。
@@ -416,7 +418,7 @@ OPENWRT_PROFILE=friendlyarm_nanopi-r3s
 - 多租户计费。
 - 复杂 RBAC。
 - 通用工作流引擎。
-- 与 `full_tunnel_exit` 无关的代理能力。
+- 与 `gateway_full_tunnel` 无关的代理能力。
 
 任何新增模块都必须能用一句话说明职责。如果一个模块同时处理 policy、平台命令、状态持久化和 Web 通信，必须拆分。
 

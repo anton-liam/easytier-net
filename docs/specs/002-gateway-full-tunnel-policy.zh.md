@@ -1,8 +1,8 @@
-# 002 Full Tunnel Exit Policy Spec
+# 002 Gateway Full Tunnel Policy Spec
 
 ## 目标
 
-定义 Web 控制台和 Agent 之间的 full tunnel 出口策略模型。该模型支持任意 source 节点选择任意 exit 节点，并支持实时启用、停用、切换和回滚。
+定义 Web 控制台和 Agent 之间的 gateway full tunnel 出口策略模型。该模型支持任意 source R3S 网关选择任意 exit R3S 节点，并让 source R3S 下游 LAN/Wi-Fi 设备流量经 exit R3S 异地出口发出。策略支持实时启用、停用、切换和回滚。
 
 ## Logical Policy
 
@@ -11,10 +11,11 @@ Web 控制台保存 logical policy：
 ```json
 {
   "policy_id": "full-exit-001",
-  "type": "full_tunnel_exit",
+  "type": "gateway_full_tunnel",
   "enabled": true,
   "network_instance_id": "00000000-0000-0000-0000-000000000000",
   "source_machine_id": "node-a",
+  "source_lan_cidr": "192.168.10.0/24",
   "exit_machine_id": "node-b",
   "desired_version": 12,
   "protect_control_plane": true,
@@ -31,10 +32,11 @@ Web 控制台保存 logical policy：
 
 约束：
 
-- 一个 source 节点同一时间只能有一个 enabled `full_tunnel_exit`。
+- 一个 source 节点同一时间只能有一个 enabled `gateway_full_tunnel`。
 - 一个 exit 节点可以服务多个 source 节点。
 - `source_machine_id` 和 `exit_machine_id` 不能相同。
 - `source_machine_id` 和 `exit_machine_id` 必须在同一 EasyTier network instance 中可达。
+- `source_lan_cidr` 必须是 source R3S 本地 LAN/Wi-Fi 下游网段，不能覆盖 EasyTier 虚拟网段、Web/control-plane 地址或 exit 节点 underlay 地址。
 
 ## Device Policy
 
@@ -45,9 +47,10 @@ Web 下发给 source 节点：
   "policy_id": "full-exit-001",
   "device_policy_id": "full-exit-001/source",
   "version": 12,
-  "role": "client_exit_via_peer",
+  "role": "client_gateway_via_peer",
   "network_instance_id": "00000000-0000-0000-0000-000000000000",
   "source_machine_id": "node-a",
+  "source_lan_cidr": "192.168.10.0/24",
   "exit_machine_id": "node-b",
   "exit_peer_ipv4": "10.126.126.3",
   "protect_control_plane": true,
@@ -62,9 +65,10 @@ Web 下发给 exit 节点：
   "policy_id": "full-exit-001",
   "device_policy_id": "full-exit-001/exit",
   "version": 12,
-  "role": "provide_exit_for_peer",
+  "role": "provide_exit_for_gateway",
   "network_instance_id": "00000000-0000-0000-0000-000000000000",
   "source_machine_id": "node-a",
+  "source_lan_cidr": "192.168.10.0/24",
   "source_peer_ipv4": "10.126.126.2",
   "exit_machine_id": "node-b",
   "rollback_enabled": true
@@ -81,9 +85,9 @@ prepare exit provider -> switch source client -> cleanup old provider
 
 切换 `node-a -> node-b` 到 `node-a -> node-c`：
 
-1. 下发 `provide_exit_for_peer` 给 `node-c`。
+1. 下发 `provide_exit_for_gateway` 给 `node-c`。
 2. 等待 `node-c` 上报 `prepared`。
-3. 下发 `client_exit_via_peer` 给 `node-a`。
+3. 下发 `client_gateway_via_peer` 给 `node-a`。
 4. 等待 `node-a` 上报 `active`。
 5. 下发 cleanup 给 `node-b`，只清理 `node-a` 对应规则。
 
@@ -109,15 +113,15 @@ disabled
 source 节点进入 `active` 的条件：
 
 - control-plane protected route 已建立。
-- default route 已指向 exit peer。
+- `source_lan_cidr` 的出口策略路由已指向 exit peer。
 - Web/control-plane healthcheck 成功。
-- exit healthcheck 成功。
+- 使用 source LAN 测试客户端或等价 network namespace 发起的 exit healthcheck 成功。
 - runtime report 已包含 observed exit。
 
 exit 节点进入 `prepared` 的条件：
 
 - IPv4 forwarding 已启用。
-- source peer 对应 NAT/forwarding 已存在。
+- `source_lan_cidr` 对应 NAT/forwarding 已存在。
 - 不影响其它 source 的现有规则。
 - runtime report 已包含 provider 状态。
 
@@ -136,7 +140,7 @@ Agent 行为：
 2. 记录当前 underlay route。
 3. 添加 `/32` 或等价 host route。
 4. 验证 control-plane 可达。
-5. 才允许改 default route。
+5. 才允许改 LAN CIDR 策略路由或 forwarding/NAT。
 
 ## Runtime Report
 
@@ -150,13 +154,14 @@ Agent 行为：
     "policy_id": "full-exit-001",
     "device_policy_id": "full-exit-001/source",
     "version": 12,
-    "role": "client_exit_via_peer",
+    "role": "client_gateway_via_peer",
     "status": "active"
   },
   "network": {
     "easytier_interface": "easytier0",
     "easytier_ipv4": "10.126.126.2",
-    "default_route": "via 10.126.126.3 dev easytier0",
+    "source_lan_cidr": "192.168.10.0/24",
+    "gateway_route": "from 192.168.10.0/24 via 10.126.126.3 dev easytier0",
     "protected_routes": ["192.168.64.4/32 via 192.168.64.1 dev eth0"]
   },
   "firewall": {
@@ -176,11 +181,11 @@ Agent 行为：
 
 如果 source 节点无法验证 control-plane：
 
-- 禁止切换 default route。
+- 禁止切换 LAN CIDR 策略路由。
 - 上报 `degraded`。
 - 保留 last known good。
 
-如果 source 节点切换 default route 后 exit healthcheck 失败：
+如果 source 节点切换 LAN CIDR 策略路由后 exit healthcheck 失败：
 
 - 执行 rollback。
 - 上报 `rollbacked`。
@@ -190,4 +195,3 @@ Agent 行为：
 
 - Web 不下发 source 切换。
 - logical policy 状态为 `degraded`。
-
