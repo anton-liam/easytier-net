@@ -205,6 +205,41 @@ platform/linux       systemd, nftables, iproute2
 
 通用 policy、planner、healthcheck、report 逻辑不得直接依赖 OpenWrt 专属命令。
 
+## 流量转发实现规范
+
+第一阶段流量转发必须基于系统路由、EasyTier 网络能力、OpenWrt `fw4`/`nftables` 和 Linux `iproute2` 实现。
+
+OpenWrt/iStoreOS 上不得将基础出口转发能力绑定到 OpenClash。OpenClash 只能作为后续高级规则分流、透明代理、订阅规则、DNS 策略增强的可选集成，不能作为 `exit_via_peer` 的基础依赖。
+
+基础出口转发模型：
+
+```text
+A 节点:
+  保护 Web/control-plane underlay route
+  default route 指向 B 的 EasyTier IPv4
+  上报 route 和 healthcheck 状态
+
+B 节点:
+  开启 IPv4 forwarding
+  允许 easytier interface 到 WAN forwarding
+  对来自 EasyTier 网段的出口流量做 masquerade/NAT
+  上报 firewall、NAT 和出口 healthcheck 状态
+```
+
+OpenWrt/iStoreOS 后端优先使用：
+
+```text
+uci firewall -> fw4 reload -> nftables
+```
+
+普通 Linux 后端优先使用：
+
+```text
+iproute2 -> nftables
+```
+
+不得在通用 Agent 逻辑中写死 `iptables` 命令。若需要兼容旧系统，只能在 platform backend 内部做能力探测和降级处理，并必须把实际 backend 写入 runtime report。
+
 ## Policy 规范
 
 Policy 是 Web 到 Agent 的唯一控制输入。
