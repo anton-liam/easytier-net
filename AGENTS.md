@@ -127,7 +127,7 @@ Spec 和 Plan 必须避免空泛表达。以下表达不合格：
 
 - “Agent 在 healthcheck 连续失败 30 秒后执行 rollback，并上报 `policy_status=rollbacked`。”
 - “Web 节点详情页同时展示 desired policy version 和 observed policy version。”
-- “containerlab 测试必须断开 node-b 后验证 node-a 进入 degraded 或 rollback 状态。”
+- “containerlab 测试必须断开当前 exit 节点后验证 source 节点进入 degraded 或 rollback 状态。”
 
 任何实现代码提交前，必须能在 `docs/specs/` 或 `docs/plans/` 中找到对应设计依据；纯修复拼写、格式化、CI 配置的小改动除外。
 
@@ -209,17 +209,17 @@ platform/linux       systemd, nftables, iproute2
 
 第一阶段流量转发必须基于系统路由、EasyTier 网络能力、OpenWrt `fw4`/`nftables` 和 Linux `iproute2` 实现。
 
-OpenWrt/iStoreOS 上不得将基础出口转发能力绑定到 OpenClash。OpenClash 只能作为后续高级规则分流、透明代理、订阅规则、DNS 策略增强的可选集成，不能作为 `exit_via_peer` 的基础依赖。
+OpenWrt/iStoreOS 上不得将基础出口转发能力绑定到 OpenClash。OpenClash 只能作为后续高级规则分流、透明代理、订阅规则、DNS 策略增强的可选集成，不能作为 `full_tunnel_exit` 的基础依赖。
 
 基础出口转发模型：
 
 ```text
-A 节点:
+source 节点:
   保护 Web/control-plane underlay route
-  default route 指向 B 的 EasyTier IPv4
+  default route 指向 exit 节点的 EasyTier IPv4
   上报 route 和 healthcheck 状态
 
-B 节点:
+exit 节点:
   开启 IPv4 forwarding
   允许 easytier interface 到 WAN forwarding
   对来自 EasyTier 网段的出口流量做 masquerade/NAT
@@ -255,22 +255,31 @@ Policy 必须包含：
 - rollback 配置
 - healthcheck 配置
 
-第一阶段必须支持：
+第一阶段必须支持 logical policy：
 
 ```text
-exit_via_peer
+full_tunnel_exit
 ```
 
-该策略用于让节点 A 的默认出口流量经节点 B 转发。
+该策略用于让任意 source 节点的默认出口流量经任意 exit 节点转发。
 
-`exit_via_peer` 必须支持：
+Web 必须将 `full_tunnel_exit` 拆成两个 device policy：
+
+```text
+client_exit_via_peer
+provide_exit_for_peer
+```
+
+`full_tunnel_exit` 必须支持：
 
 - 指定 exit peer 的 EasyTier IPv4。
 - 保护 Web/control-plane underlay route。
 - 检查 EasyTier interface。
 - 检查 peer 可达性。
-- 在 A 上应用默认路由。
-- 在 B 上应用 forwarding/NAT。
+- 在 source 节点上应用默认路由。
+- 在 exit 节点上应用 forwarding/NAT。
+- 一个 source 同一时间只能启用一个 full tunnel exit。
+- 一个 exit 可以服务多个 source。
 - 验证出口可用。
 - 失败时回滚。
 
@@ -339,11 +348,12 @@ Web UI 必须至少能表达：
 
 containerlab 测试必须覆盖：
 
-- A/B/C 节点启动。
-- Web 下发 A 经 B 出口策略。
-- A 默认路由切换到 B。
+- Web、node-a、node-b、node-c 节点启动。
+- Web 下发任意 source 经任意 exit 的 full tunnel 策略。
+- source 默认路由切换到 exit。
+- source 从一个 exit 实时切换到另一个 exit。
 - Web/control-plane underlay route 未被默认路由捕获。
-- B 断开后 A 状态进入 degraded 或 rollback。
+- 当前 exit 断开后 source 状态进入 degraded 或 rollback。
 - Agent 上报最终状态。
 
 ## 构建和发布规范
