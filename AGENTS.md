@@ -50,6 +50,87 @@ make lab-test
 make lab-down
 ```
 
+## 中文 Spec 和 Plan 规范
+
+所有新增产品能力、架构调整、跨仓库改动、目标设备适配、测试环境能力，都必须先写中文 spec，再写中文 plan。
+
+推荐目录：
+
+```text
+docs/specs/               中文需求和架构规格
+docs/plans/               中文实施计划
+```
+
+文件命名必须稳定、可排序、可检索：
+
+```text
+docs/specs/001-product-scope.zh.md
+docs/specs/002-agent-architecture.zh.md
+docs/specs/003-web-policy-api.zh.md
+docs/plans/001-bootstrap-workspace.zh.md
+docs/plans/002-easytier-agent-mvp.zh.md
+docs/plans/003-containerlab-e2e.zh.md
+```
+
+Spec 必须回答：
+
+- 要解决的问题。
+- 不解决的问题。
+- 目标用户和使用场景。
+- 当前系统边界。
+- 需要修改的仓库和模块。
+- 数据模型和 API 边界。
+- 状态机或关键流程。
+- 安全边界。
+- 可观测性要求。
+- 测试和验收标准。
+
+Spec 禁止出现：
+
+- 未解释的“后续完善”。
+- 无验收标准的能力描述。
+- 只描述 UI、不描述数据和状态来源。
+- 只描述命令、不描述声明式 policy。
+- 把 EasyTier 数据面修改作为默认方案。
+
+Plan 必须回答：
+
+- 基于哪个 spec。
+- 分几个阶段实施。
+- 每阶段修改哪些文件或模块。
+- 每阶段产出什么可运行能力。
+- 每阶段如何测试。
+- 每阶段如何回滚。
+- 哪些任务可以并行。
+- 哪些任务依赖上一步结果。
+
+Plan 必须拆成可执行任务，每个任务至少包含：
+
+- 目标。
+- 涉及目录或文件。
+- 实施步骤。
+- 验证命令。
+- 预期结果。
+- 提交建议。
+
+Spec 和 Plan 的语言必须使用中文，代码、命令、API 字段、文件路径保留英文原文。
+
+Spec 和 Plan 必须避免空泛表达。以下表达不合格：
+
+- “优化体验”
+- “增强稳定性”
+- “完善错误处理”
+- “增加相关测试”
+- “支持更多平台”
+
+必须改写成可验收描述，例如：
+
+- “Agent 在 healthcheck 连续失败 30 秒后执行 rollback，并上报 `policy_status=rollbacked`。”
+- “Web 节点详情页同时展示 desired policy version 和 observed policy version。”
+- “containerlab 测试必须断开 node-b 后验证 node-a 进入 degraded 或 rollback 状态。”
+
+任何实现代码提交前，必须能在 `docs/specs/` 或 `docs/plans/` 中找到对应设计依据；纯修复拼写、格式化、CI 配置的小改动除外。
+
 ## EasyTier Fork 开发规范
 
 允许修改：
@@ -280,4 +361,3 @@ OPENWRT_PROFILE=friendlyarm_nanopi-r3s
 - 实现 Agent MVP。
 - 实现 Web policy/report API MVP。
 - 实现 LuCI Agent 配置和状态页 MVP。
-
