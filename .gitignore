@@ -5,3 +5,5 @@ vendor/EasyTier/
 vendor/luci-app-easytier/
 tests/lab/.runtime/
 
+
+.worktrees/
