@@ -372,6 +372,46 @@ OPENWRT_PROFILE=friendlyarm_nanopi-r3s
 
 ## 代码质量规范
 
+实现必须克制，避免过度设计。
+
+所有功能必须服务于当前中文 spec 和 plan 中明确列出的验收目标。不得为了“未来可能需要”提前引入复杂抽象、插件系统、通用编排引擎、规则 DSL、跨平台框架或额外服务。
+
+开发 EasyTier fork 时，必须优先参考 EasyTier 现有代码范式：
+
+- Rust 模块组织跟随现有 crate 风格。
+- RPC/proto 命名跟随现有 `api.*`、`web.*` 语义。
+- 错误处理跟随现有 `anyhow`、`thiserror`、`rpc_types::error` 使用方式。
+- 异步任务、session、manager、storage 的边界跟随现有实现。
+- Web 前端 UI 组件和状态管理跟随现有 easytier-web frontend 风格。
+
+开发 LuCI fork 时，必须优先参考 `luci-app-easytier` 现有结构和 OpenWrt 常规包范式，不引入与 LuCI 体系不一致的前端框架或服务管理方式。
+
+开发 Agent 时，第一阶段只实现 `full_tunnel_exit` 所需的最小能力：
+
+- policy 解析。
+- policy 校验。
+- dry-run plan。
+- source 节点默认路由切换。
+- exit 节点 forwarding/NAT。
+- control-plane protected route。
+- verify。
+- rollback。
+- runtime report。
+
+第一阶段不得实现：
+
+- 通用远程命令执行。
+- 任意流量分类规则引擎。
+- OpenClash 集成。
+- 多租户计费。
+- 复杂 RBAC。
+- 通用工作流引擎。
+- 与 `full_tunnel_exit` 无关的代理能力。
+
+任何新增模块都必须能用一句话说明职责。如果一个模块同时处理 policy、平台命令、状态持久化和 Web 通信，必须拆分。
+
+任何新增配置项都必须有直接使用场景。没有被 MVP 使用的配置项不得提前加入。
+
 所有脚本必须：
 
 - 使用 `set -eu`。
