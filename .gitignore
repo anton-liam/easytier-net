@@ -1,0 +1,7 @@
+build/
+dist/
+.DS_Store
+vendor/EasyTier/
+vendor/luci-app-easytier/
+tests/lab/.runtime/
+

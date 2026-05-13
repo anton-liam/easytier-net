@@ -1,0 +1,12 @@
+FROM debian:bookworm-slim
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends \
+    ca-certificates curl iproute2 iputils-ping nftables tcpdump procps \
+  && rm -rf /var/lib/apt/lists/*
+
+COPY entrypoint-node.sh /entrypoint-node.sh
+RUN chmod +x /entrypoint-node.sh
+
+ENTRYPOINT ["/entrypoint-node.sh"]
+

@@ -1,0 +1,30 @@
+name: easytier-net
+
+mgmt:
+  network: easytier-net-mgmt
+  ipv4-subnet: 172.30.40.0/24
+
+topology:
+  nodes:
+    web:
+      kind: linux
+      image: easytier-net/web-lab:dev
+      privileged: true
+      mgmt-ipv4: 172.30.40.10
+
+    node-a:
+      kind: linux
+      image: easytier-net/node-lab:dev
+      privileged: true
+      mgmt-ipv4: 172.30.40.11
+
+    node-b:
+      kind: linux
+      image: easytier-net/node-lab:dev
+      privileged: true
+      mgmt-ipv4: 172.30.40.12
+
+  links:
+    - endpoints: ["node-a:eth1", "web:eth1"]
+    - endpoints: ["node-b:eth1", "web:eth2"]
+

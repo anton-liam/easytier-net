@@ -1,0 +1,20 @@
+name: smoke
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  shell-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Bootstrap check
+        run: make bootstrap
+      - name: Target manifest
+        run: make build TARGET=nanopi-r3s
+      - name: Lab image build
+        run: |
+          docker build -t easytier-net/node-lab:dev -f tests/lab/images/Dockerfile.node tests/lab/images
+          docker build -t easytier-net/web-lab:dev -f tests/lab/images/Dockerfile.web tests/lab/images
+
