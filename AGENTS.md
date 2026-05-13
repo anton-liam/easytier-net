@@ -216,15 +216,17 @@ OpenWrt/iStoreOS 上不得将基础出口转发能力绑定到 OpenClash。OpenC
 ```text
 source 节点:
   保护 Web/control-plane underlay route
-  对 source LAN CIDR 建立到 exit 节点 EasyTier IPv4 的策略路由
-  上报 route、source LAN CIDR 和 healthcheck 状态
+  对 managed_cidrs、ingress_ifaces 和可选 device ordinary traffic 建立到 exit 节点 EasyTier IPv4 的策略路由
+  上报 route、managed traffic 和 healthcheck 状态
 
 exit 节点:
   开启 IPv4 forwarding
-  允许 easytier interface 到 WAN forwarding
-  对来自 source LAN CIDR 的出口流量做 masquerade/NAT
+  允许 easytier interface 到 exit_egress forwarding
+  对来自 managed_cidrs 或 source tunnel SNAT 地址的出口流量做 masquerade/NAT
   上报 firewall、NAT 和出口 healthcheck 状态
 ```
+
+不得假设 OpenWrt/iStoreOS 接口名固定为 `wan` 或 `lan`。Agent 必须通过 UCI/netifd/route 探测接口和 zone，Web policy 可以用 `ingress_ifaces`、`exit_egress` 显式覆盖。
 
 OpenWrt/iStoreOS 后端优先使用：
 
@@ -261,7 +263,7 @@ Policy 必须包含：
 gateway_full_tunnel
 ```
 
-该策略用于让任意 source R3S 网关下游 LAN/Wi-Fi 设备的出口流量经任意 exit R3S 节点异地转发。
+该策略用于让任意 source R3S 上的受管流量经任意 exit R3S 节点异地转发。受管流量包括匹配 `managed_cidrs`、`ingress_ifaces` 的客户端流量，以及可选的 source 设备自身普通出站流量。Web/control-plane、config-server、relay、SSH 管理地址和本地 underlay 保活流量必须始终排除。
 
 Web 必须将 `gateway_full_tunnel` 拆成两个 device policy：
 
@@ -273,12 +275,15 @@ provide_exit_for_gateway
 `gateway_full_tunnel` 必须支持：
 
 - 指定 exit peer 的 EasyTier IPv4。
-- 指定 source LAN CIDR。
+- 指定 managed CIDR。
+- 指定 ingress interface，可为空并由 Agent 自动探测。
+- 指定 exit egress，可为 `auto`。
+- 指定是否包含 source 设备自身普通出站流量。
 - 保护 Web/control-plane underlay route。
 - 检查 EasyTier interface。
 - 检查 peer 可达性。
-- 在 source 节点上对 source LAN CIDR 应用策略路由。
-- 在 exit 节点上对 source LAN CIDR 应用 forwarding/NAT。
+- 在 source 节点上对受管流量应用策略路由。
+- 在 exit 节点上对受管流量应用 forwarding/NAT。
 - 一个 source 同一时间只能启用一个 gateway full tunnel exit。
 - 一个 exit 可以服务多个 source。
 - 验证出口可用。
@@ -296,7 +301,9 @@ Agent 必须周期性上报节点状态。最小状态包括：
 - 当前 policy id/version/status
 - EasyTier interface 状态
 - 默认路由
-- source LAN CIDR 策略路由
+- managed traffic 策略路由
+- ingress interface
+- exit egress
 - control-plane 保护路由
 - firewall backend
 - forwarding/NAT 状态
@@ -352,7 +359,7 @@ containerlab 测试必须覆盖：
 
 - Web、node-a、node-b、node-c 节点启动。
 - Web 下发任意 source 经任意 exit 的 gateway full tunnel 策略。
-- source LAN CIDR 策略路由切换到 exit。
+- source 受管流量策略路由切换到 exit。
 - source 从一个 exit 实时切换到另一个 exit。
 - Web/control-plane underlay route 未被默认路由捕获。
 - 当前 exit 断开后 source 状态进入 degraded 或 rollback。
@@ -403,7 +410,7 @@ OPENWRT_PROFILE=friendlyarm_nanopi-r3s
 - policy 解析。
 - policy 校验。
 - dry-run plan。
-- source 网关策略路由切换。
+- managed traffic 策略路由切换。
 - exit 节点 forwarding/NAT。
 - control-plane protected route。
 - verify。

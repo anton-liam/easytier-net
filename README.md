@@ -57,9 +57,11 @@ Daily tests use containerlab:
 
 ```text
 web      EasyTier Web console + relay/config server
-node-a   simulated OpenWrt client, exit traffic points to node-b
-node-b   simulated OpenWrt exit node
+node-a   simulated source R3S gateway
+client-a simulated managed client connected to node-a
+node-b   simulated exit R3S gateway
+internet-b simulated upstream network behind node-b
+node-c   simulated alternate exit R3S gateway
 ```
 
 Real OpenWrt/iStoreOS validation is a second layer using ImageBuilder/QEMU. UTM and physical NanoPi R3S are final acceptance environments.
-

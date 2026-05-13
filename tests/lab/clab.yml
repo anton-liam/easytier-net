@@ -18,13 +18,33 @@ topology:
       privileged: true
       mgmt-ipv4: 172.30.40.11
 
+    client-a:
+      kind: linux
+      image: easytier-net/node-lab:dev
+      privileged: true
+      mgmt-ipv4: 172.30.40.21
+
     node-b:
       kind: linux
       image: easytier-net/node-lab:dev
       privileged: true
       mgmt-ipv4: 172.30.40.12
 
+    internet-b:
+      kind: linux
+      image: easytier-net/node-lab:dev
+      privileged: true
+      mgmt-ipv4: 172.30.40.22
+
+    node-c:
+      kind: linux
+      image: easytier-net/node-lab:dev
+      privileged: true
+      mgmt-ipv4: 172.30.40.13
+
   links:
     - endpoints: ["node-a:eth1", "web:eth1"]
     - endpoints: ["node-b:eth1", "web:eth2"]
-
+    - endpoints: ["client-a:eth1", "node-a:eth2"]
+    - endpoints: ["node-b:eth2", "internet-b:eth1"]
+    - endpoints: ["node-c:eth1", "web:eth3"]

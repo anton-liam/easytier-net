@@ -2,9 +2,9 @@
 
 ## 要解决的问题
 
-本阶段要把 EasyTier 从“节点可组网”推进到“Web 控制台可管理任意 R3S 网关之间的下游设备全量出口转发”。
+本阶段要把 EasyTier 从“节点可组网”推进到“Web 控制台可管理任意 R3S 网关之间的受管流量异地出口转发”。
 
-Web 控制台必须能在同一 EasyTier 网络内选择任意一个 source R3S 和任意一个 exit R3S，创建、启用、停用、切换 gateway full tunnel 出口策略。策略启用后，接入 source R3S LAN/Wi-Fi 的下游设备流量经 EasyTier 网络转发到 exit R3S，由 exit R3S 通过系统 forwarding/NAT 从异地 WAN 出口发出。
+Web 控制台必须能在同一 EasyTier 网络内选择任意一个 source R3S 和任意一个 exit R3S，创建、启用、停用、切换 gateway full tunnel 出口策略。策略启用后，source R3S 上匹配 `managed_cidrs`、`ingress_ifaces` 以及可选 `include_device_traffic` 的受管流量，经 EasyTier 网络转发到 exit R3S，由 exit R3S 通过指定或自动探测的 `exit_egress` 路径从异地出口发出。
 
 ## 不解决的问题
 
@@ -26,11 +26,11 @@ Web 控制台必须能在同一 EasyTier 网络内选择任意一个 source R3S 
 
 典型场景：
 
-- 管理员在 Web 控制台选择 `node-a -> node-b`，让接入 `node-a` LAN/Wi-Fi 的电脑、手机、下级 Wi-Fi 路由器等设备流量走 `node-b` 异地出口。
+- 管理员在 Web 控制台选择 `node-a -> node-b`，让进入 `node-a` 受管接口或匹配受管网段的电脑、手机、下级 Wi-Fi 路由器等设备流量走 `node-b` 异地出口。
 - 管理员实时切换为 `node-a -> node-c`。
 - 管理员停用 `node-a` 的网关出口转发策略。
 - 多个 source 节点同时使用同一个 exit 节点。
-- 节点切换出口时，source R3S 自身仍能保持与 Web 控制台、config-server、relay 的控制面连接。
+- 节点切换出口时，source R3S 自身仍能保持与 Web 控制台、config-server、relay、SSH 管理入口和本地 underlay 网关的控制面连接。
 
 ## 当前系统边界
 
@@ -55,7 +55,7 @@ Web 控制台必须能在同一 EasyTier 网络内选择任意一个 source R3S 
 - Web 将 logical policy 拆成两个 device policy：
   - source 节点：`client_gateway_via_peer`
   - exit 节点：`provide_exit_for_gateway`
-- Agent 在 source R3S 上对指定 LAN CIDR 执行网关策略路由切换。
+- Agent 在 source R3S 上对受管流量执行网关策略路由切换。
 - Agent 执行 exit 节点 forwarding/NAT。
 - Agent 在修改默认路由前保护 control-plane underlay route。
 - Agent 上报 runtime report 和 policy apply result。
@@ -70,7 +70,7 @@ Agent 修改 default route、policy route、firewall/NAT 前，必须先建立 c
 
 切换策略后必须再次验证 Web/control-plane 可达。验证失败时必须回滚到 last known good 状态。
 
-source R3S 自身的控制面连接优先保持原 underlay 出口。MVP 接管的是 source R3S 下游 LAN CIDR 的出口流量，不要求接管 source R3S 自身的全部系统流量。
+source R3S 自身的控制面和管理连接必须保持 protected underlay 出口。source R3S 自身普通出站流量可以通过 `include_device_traffic` 纳入受管流量，但 protected traffic 必须始终排除。
 
 ## 转发实现边界
 
@@ -83,13 +83,17 @@ source R3S 自身的控制面连接优先保持原 underlay 出口。MVP 接管�
 
 不得在通用 Agent 逻辑中写死 `iptables`。旧系统兼容只能放在 platform backend 中，并且必须在 runtime report 中上报实际 backend。
 
+不得假设接口名固定为 `wan` 或 `lan`。Agent 必须支持主路由、旁路由、单臂旁路由和自定义 OpenWrt zone。
+
 ## 可观测性要求
 
 Web 控制台必须展示：
 
 - logical policy desired source/exit 节点。
 - source 节点 observed exit 节点。
-- source LAN CIDR。
+- managed CIDR。
+- ingress interface。
+- exit egress。
 - exit 节点 observed provider 状态。
 - policy version。
 - source apply result。
@@ -102,7 +106,7 @@ Web 控制台必须展示：
 
 containerlab 至少验证：
 
-- 创建 `node-a -> node-b` 策略后，接入 `node-a` LAN CIDR 的测试客户端出口走 `node-b`。
+- 创建 `node-a -> node-b` 策略后，匹配 `node-a` managed traffic 的测试客户端出口走 `node-b`。
 - 切换 `node-a -> node-c` 时，`node-a` 和 Web 控制台的连接不中断超过设定阈值。
 - 停用策略后，`node-a` 删除 gateway full tunnel 策略路由和 forwarding 规则，并恢复 last known good 状态。
 - 下发不可达 exit 节点时，`node-a` 不失联，策略进入 `degraded` 或 `rollbacked`。
