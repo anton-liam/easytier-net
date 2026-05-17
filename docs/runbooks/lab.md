@@ -190,3 +190,20 @@ After the IPK is installed and the native EasyTier network instance is running, 
 ```
 
 If the dry-run plan protects `192.168.64.4/32` before applying gateway routes and uses the actual EasyTier interface, run again with `--execute`.
+
+## UTM Agent 服务化与稳定性验证
+
+A/B iStoreOS 节点应由 procd 管理 `easytier-agent`，不要长期依赖手动后台进程。
+
+```sh
+PATH="/Users/anton/www/easytier-net/build/utm-ssh:$PATH" make utm-configure-agent-service
+PATH="/Users/anton/www/easytier-net/build/utm-ssh:$PATH" make utm-stability-test
+PATH="/Users/anton/www/easytier-net/build/utm-ssh:$PATH" UTM_STABILITY_CHAOS=1 make utm-stability-test
+```
+
+验收结果：
+
+- A/B `/etc/init.d/easytier-agent status` 为 `running`。
+- A/B 到 C Web 的路由走 underlay，例如 `dev br-lan`。
+- 杀掉 A/B Agent 后，procd 能自动重启。
+- Agent 重启后 Web policy observed state 能恢复。

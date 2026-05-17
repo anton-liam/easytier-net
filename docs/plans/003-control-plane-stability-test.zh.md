@@ -89,9 +89,12 @@ git commit -m "test: add UTM control plane stability checks"
 实施步骤：
 
 1. 支持 `UTM_STABILITY_CHAOS=1`。
-2. 重启 C Web 后轮询 A/B 访问 C Web。
-3. 短暂停止 A/B Agent 后恢复进程。
-4. 检查 Web policy snapshot 是否重新出现 observed report。
+2. 短暂停止 A/B Agent 进程。
+3. 等待 procd 自动恢复 Agent。
+4. 重启 C Web 进程。
+5. 轮询 A/B 到 C Web 的可达性。
+6. 检查 A/B 到 C Web 的路由仍走 underlay。
+7. 检查 Web policy snapshot 是否重新出现 observed report。
 
 验证命令：
 
@@ -105,6 +108,39 @@ PATH="/Users/anton/www/easytier-net/build/utm-ssh:$PATH" UTM_STABILITY_CHAOS=1 m
 - Agent 恢复后 observed state 重新上报。
 - 脚本失败时返回非零退出码并输出故障节点。
 
+## 阶段 4：UTM Agent procd 接管
+
+目标：让 A/B 上的 Agent 由 procd 管理，支持故障注入时自动拉起。
+
+涉及文件：
+
+- `Makefile`
+- `scripts/utm-configure-agent-service.sh`
+- `scripts/openwrt-stage-agent-package.sh`
+
+实施步骤：
+
+1. `openwrt-stage-agent-package.sh` 生成的 init 脚本支持 `interval_seconds`。
+2. 新增 `make utm-configure-agent-service`。
+3. 通过 UCI 写入 A/B 的 Web URL、user id、machine id、token、EasyTier IPv4、EasyTier iface、执行模式。
+4. 启用 `/etc/init.d/easytier-agent enable`。
+5. 重启服务并确认 `/etc/init.d/easytier-agent status` 为 `running`。
+
+验证命令：
+
+```sh
+PATH="/Users/anton/www/easytier-net/build/utm-ssh:$PATH" make utm-configure-agent-service
+PATH="/Users/anton/www/easytier-net/build/utm-ssh:$PATH" make utm-stability-test
+```
+
+预期结果：
+
+- A/B 的 `/etc/config/easytier_agent` 中 `enabled=1`。
+- A/B 的 Agent 进程由 procd 拉起。
+- A/B 的 Agent 命令包含 `--interval-seconds 10`。
+
 ## 当前边界
 
-第一版先实现阶段 1 和阶段 2。阶段 3 需要确认 A/B 上 Agent 已经由 procd 或等价 supervisor 管理，否则脚本不能可靠恢复被停止的进程。
+已实现阶段 1、阶段 2、阶段 3 和阶段 4。
+
+当前 chaos 测试覆盖 Agent 进程故障注入、procd 自动重入和 C Web 进程重启；尚未覆盖 EasyTier interface 删除、exit 节点断链和错误路由注入。这些需要在下一阶段补充更细粒度的恢复脚本，且必须保证每个故障注入都有自动恢复命令。

@@ -128,8 +128,16 @@ UTM_STABILITY_CHAOS=1 make utm-stability-test
 
 故障注入必须覆盖：
 
+- 短暂停止 A/B Agent 后由 procd 自动重启。
 - 重启 C Web 后 A/B 仍能重新访问 C Web。
-- 短暂停止 A/B Agent 后重新启动，observed state 能恢复。
+- Agent 重启后 A/B 仍能访问 C Web。
+- Agent 重启后 observed state 能恢复。
+- A/B 到 C Web 的路由仍走 underlay，不经 EasyTier tunnel。
+
+后续增强故障注入覆盖：
+
+- 删除 EasyTier interface 后 Agent 进入 degraded 或 rollback。
+- 断开 exit 节点后 source 进入 degraded 或 rollback。
 - 在策略路由表中注入错误 default route 时，C Web `/32` protected route 仍可达。
 
 ## 失败处理

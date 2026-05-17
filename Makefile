@@ -2,7 +2,7 @@ SHELL := /bin/sh
 
 TARGET ?= x86_64-linux
 
-.PHONY: bootstrap vendor build fetch-nanopi-r3s-sdk build-nanopi-r3s-docker lab-up lab-test lab-down utm-deploy-web utm-stability-test clean status
+.PHONY: bootstrap vendor build fetch-nanopi-r3s-sdk build-nanopi-r3s-docker lab-up lab-test lab-down utm-deploy-web utm-configure-agent-service utm-stability-test clean status
 
 bootstrap:
 	./scripts/bootstrap.sh
@@ -30,6 +30,9 @@ lab-down:
 
 utm-deploy-web:
 	./scripts/utm-deploy-web.sh
+
+utm-configure-agent-service:
+	./scripts/utm-configure-agent-service.sh
 
 utm-stability-test:
 	./scripts/utm-stability-test.sh

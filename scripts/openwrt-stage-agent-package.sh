@@ -104,7 +104,7 @@ STOP=10
 USE_PROCD=1
 
 start_service() {
-  local enabled web_base_url user_id machine_id internal_auth_token easytier_ipv4 easytier_iface execute
+  local enabled web_base_url user_id machine_id internal_auth_token easytier_ipv4 easytier_iface interval_seconds execute
 
   enabled="$(uci -q get easytier_agent.main.enabled || echo 0)"
   [ "$enabled" = "1" ] || return 0
@@ -115,6 +115,7 @@ start_service() {
   internal_auth_token="$(uci -q get easytier_agent.main.internal_auth_token || true)"
   easytier_ipv4="$(uci -q get easytier_agent.main.easytier_ipv4 || true)"
   easytier_iface="$(uci -q get easytier_agent.main.easytier_iface || true)"
+  interval_seconds="$(uci -q get easytier_agent.main.interval_seconds || echo 10)"
   execute="$(uci -q get easytier_agent.main.execute || echo 0)"
 
   [ -n "$web_base_url" ] || { echo "missing easytier_agent.main.web_base_url" >&2; return 1; }
@@ -128,7 +129,8 @@ start_service() {
     --web-base-url "$web_base_url" \
     --user-id "$user_id" \
     --machine-id "$machine_id" \
-    --internal-auth-token "$internal_auth_token"
+    --internal-auth-token "$internal_auth_token" \
+    --interval-seconds "$interval_seconds"
   [ -n "$easytier_ipv4" ] && procd_append_param command --easytier-ipv4 "$easytier_ipv4"
   [ -n "$easytier_iface" ] && procd_append_param command --easytier-iface "$easytier_iface"
   [ "$execute" = "1" ] && procd_append_param command --execute
@@ -148,6 +150,7 @@ config agent 'main'
 	option internal_auth_token ''
 	option easytier_ipv4 ''
 	option easytier_iface 'easytierw0'
+	option interval_seconds '10'
 	option execute '0'
 EOF
 
