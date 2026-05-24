@@ -1,4 +1,5 @@
 # C (web/control) and D (client) nodes
+# ubuntu:24.04 is multi-arch (amd64/arm64), auto-selects native platform
 
 FROM ubuntu:24.04
 

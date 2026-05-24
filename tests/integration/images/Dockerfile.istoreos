@@ -1,8 +1,8 @@
 # A/B nodes: iStoreOS base image
 # iStoreOS is based on OpenWrt, provides UCI, procd, fw4, nftables
-# Docker uses openwrt/rootfs as base since iStoreOS doesn't publish container images
+# Uses official OpenWrt rootfs — arm64 native on Apple Silicon Mac
 
-FROM openwrt/rootfs:x86_64-24.10.1
+FROM ghcr.io/openwrt/rootfs:armsr-armv8
 
 # Install packages that iStoreOS ships by default on R3S/RPi
 RUN mkdir -p /var/lock && \

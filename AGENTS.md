@@ -289,7 +289,10 @@ cleanup_all_rules();  // 删除 nft table + ip rule + ip route
 
 ### Docker 集成测试
 
-使用 Docker Compose 编排完整拓扑，A/B 使用 iStoreOS rootfs 镜像（有 UCI/procd/fw4/nftables），C/D 使用 Ubuntu。
+开发宿主机为 Mac (Apple Silicon / arm64)。所有容器镜像使用 arm64 原生：
+- A/B：`ghcr.io/openwrt/rootfs:armsr-armv8`（arm64 原生 iStoreOS 基础，有 UCI/procd/fw4/nftables）
+- C/D：`ubuntu:24.04`（multi-arch，自动使用 arm64）
+- EasyTier 二进制：编译为 `aarch64-unknown-linux-musl` 目标
 
 ```
 tests/integration/
