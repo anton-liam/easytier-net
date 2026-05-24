@@ -285,6 +285,95 @@ cleanup_all_rules();  // 删除 nft table + ip rule + ip route
 - config-server 协议本身
 - CLI 工具核心逻辑
 
+## 构建方案
+
+### 开发环境
+
+- 宿主机：Mac (Apple Silicon / arm64)
+- 交叉编译通过 Docker 或 cross 完成
+
+### 构建目标
+
+| 产物 | 目标架构 | Rust target | 部署位置 |
+|------|----------|-------------|----------|
+| easytier-core | x86_64 linux | `x86_64-unknown-linux-musl` | C 云服务器 |
+| easytier-web (含前端) | x86_64 linux | `x86_64-unknown-linux-musl` | C 云服务器 |
+| easytier-core | aarch64 linux | `aarch64-unknown-linux-musl` | R3S/RPi (A/B) |
+| OpenWrt 镜像 (R3S) | aarch64 | OpenWrt ImageBuilder | NanoPi R3S |
+| OpenWrt 镜像 (RPi4) | aarch64 | OpenWrt ImageBuilder | Raspberry Pi 4 |
+| OpenWrt 镜像 (RPi5) | aarch64 | OpenWrt ImageBuilder | Raspberry Pi 5 |
+
+### EasyTier 编译 (C 云服务器包)
+
+通过 Docker 交叉编译，产出静态链接的 musl 二进制：
+
+```sh
+make build-server
+# 产出:
+#   dist/x86_64/easytier-core
+#   dist/x86_64/easytier-web
+```
+
+构建流程：
+1. Docker 容器内使用 `rust:latest` + `musl-tools`
+2. `cargo build --release -p easytier` → easytier-core
+3. `cd easytier-web/frontend && pnpm build` → 前端静态文件
+4. `cargo build --release -p easytier-web` → easytier-web（内嵌前端）
+5. 产出复制到 `dist/x86_64/`
+
+### EasyTier 编译 (OpenWrt 设备包)
+
+```sh
+make build-openwrt
+# 产出:
+#   dist/aarch64/easytier-core
+```
+
+### OpenWrt 镜像打包
+
+使用 OpenWrt ImageBuilder 将 easytier 二进制 + luci 插件注入官方镜像：
+
+```sh
+make image-r3s      # dist/images/openwrt-r3s.img.gz
+make image-rpi4     # dist/images/openwrt-rpi4.img.gz
+make image-rpi5     # dist/images/openwrt-rpi5.img.gz
+```
+
+构建流程：
+1. 下载对应设备的 OpenWrt ImageBuilder
+2. 编译 easytier-core (aarch64-unknown-linux-musl)
+3. 打包为 ipk 或直接注入 rootfs overlay
+4. 注入 luci-app-easytier 配置界面
+5. 注入 UCI defaults（首次启动自动配置 easytier 服务）
+6. ImageBuilder 生成最终 .img.gz
+
+### 一键构建
+
+```sh
+make build-all
+# 等价于:
+#   make build-server    (C 的 x86_64 包)
+#   make build-openwrt   (A/B 的 aarch64 包)
+#   make image-r3s       (R3S 镜像)
+#   make image-rpi4      (RPi4 镜像)
+#   make image-rpi5      (RPi5 镜像)
+```
+
+### 产出目录
+
+```
+dist/
+├── x86_64/
+│   ├── easytier-core          # C 云服务器
+│   └── easytier-web           # C 云服务器 (含内嵌前端)
+├── aarch64/
+│   └── easytier-core          # A/B 设备
+└── images/
+    ├── openwrt-r3s.img.gz     # NanoPi R3S 刷机镜像
+    ├── openwrt-rpi4.img.gz    # Raspberry Pi 4 刷机镜像
+    └── openwrt-rpi5.img.gz    # Raspberry Pi 5 刷机镜像
+```
+
 ## 测试方案
 
 ### Docker 集成测试
