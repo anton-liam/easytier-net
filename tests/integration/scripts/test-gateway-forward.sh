@@ -20,16 +20,19 @@ fail() { echo "  FAIL: $1"; FAIL=$((FAIL + 1)); }
 echo "=== Applying gateway policy on A (source) ==="
 
 $COMPOSE exec -T node-a sh -c '
+  LAN_IFACE=${LAN_IFACE:-eth1}
+  WAN_IFACE=${WAN_IFACE:-eth0}
+
   nft add table inet easytier_gw
   nft add chain inet easytier_gw prerouting "{ type filter hook prerouting priority -150; }"
-  nft add rule inet easytier_gw prerouting iif eth1 ip saddr 192.168.1.0/24 meta mark set 0x7e
+  nft add rule inet easytier_gw prerouting iif $LAN_IFACE ip saddr 192.168.1.0/24 meta mark set 0x7e
   nft add chain inet easytier_gw forward "{ type filter hook forward priority 0; }"
   nft add rule inet easytier_gw forward meta mark 0x7e counter
 
   ip rule add fwmark 0x7e table 126 2>/dev/null || true
   # NOTE: in real setup, next-hop is B EasyTier IP via tun0
-  # For now, route to B underlay directly for smoke test
-  ip route replace default via 192.168.64.3 dev eth0 table 126
+  # For now, route to B underlay directly via WAN for smoke test
+  ip route replace default via 192.168.64.3 dev $WAN_IFACE table 126
 '
 
 echo "=== Applying masquerade on B (exit) ==="

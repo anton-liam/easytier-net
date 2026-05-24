@@ -1,9 +1,15 @@
 # EasyTier Gateway Integration Lab
 #
+# Hardware simulation:
+#   A = NanoPi R3S (dualport): WAN(eth0) + LAN(eth1/br-lan)
+#   B = RPi4/5 or R3S (singleport as exit): eth0 only
+#   C = Ubuntu server (control plane)
+#   D = Ubuntu client (behind A's LAN)
+#
 # Topology:
-#   D (client) --[lan_a]--> A (source) --[underlay]--> B (exit) --[wan_b]--> Internet
-#                                          |
-#                                     C (control)
+#   D --[lan_a: A's LAN port]--> A --[underlay: A's WAN port]--> B --[wan_b]--> Internet
+#                                         |
+#                                    C (control plane)
 #
 # Usage:
 #   docker compose up -d
@@ -11,14 +17,16 @@
 #   docker compose down
 
 networks:
-  # A/B/C physical interconnect
+  # A(WAN)/B/C physical interconnect — simulates upstream network
+  # On real hardware: the network that WAN ports connect to
   underlay:
     driver: bridge
     ipam:
       config:
         - subnet: 192.168.64.0/24
 
-  # D connects to A's LAN port
+  # A's LAN port — D connects here
+  # On real R3S: eth1 (br-lan), serves DHCP to downstream clients
   lan_a:
     driver: bridge
     internal: true  # D cannot reach Internet directly, must go through A
@@ -26,12 +34,16 @@ networks:
       config:
         - subnet: 192.168.1.0/24
 
-  # B exit to Internet (Docker NAT)
+  # B's exit to Internet (Docker bridge with NAT)
+  # On real hardware: B's WAN port connects to ISP/upstream with public IP
   wan_b:
     driver: bridge
 
 services:
-  # ── A: Source Gateway (iStoreOS / OpenWrt) ──
+  # ── A: Source Gateway ──
+  # Simulates: NanoPi R3S (dualport) running iStoreOS
+  # eth0 = WAN (underlay, EasyTier 组网通道)
+  # eth1 = LAN (br-lan, 下游子网设备 D 连接此口)
   node-a:
     build:
       context: .
@@ -45,15 +57,24 @@ services:
       - net.ipv4.ip_forward=1
     networks:
       underlay:
-        ipv4_address: 192.168.64.8
+        ipv4_address: 192.168.64.8   # WAN 口 IP
       lan_a:
-        ipv4_address: 192.168.1.1
+        ipv4_address: 192.168.1.1    # LAN 口 IP (br-lan)
+    environment:
+      - DEVICE_TEMPLATE=dualport
+      - ROLE=source
+      - WAN_IFACE=eth0
+      - LAN_IFACE=eth1
     volumes:
       - ./configs/node-a:/etc/easytier:ro
     depends_on:
       - web
 
-  # ── B: Exit Gateway (iStoreOS / OpenWrt) ──
+  # ── B: Exit Gateway ──
+  # Simulates: Raspberry Pi 4/5 (singleport) or R3S as exit
+  # Running iStoreOS as bypass/exit router
+  # eth0 = WAN only (接入上游网络, 出口到 Internet)
+  # No LAN port needed — only receives tunnel traffic and masquerades out
   node-b:
     build:
       context: .
@@ -67,14 +88,19 @@ services:
       - net.ipv4.ip_forward=1
     networks:
       underlay:
-        ipv4_address: 192.168.64.3
-      wan_b: {}
+        ipv4_address: 192.168.64.3   # 组网用（连 config-server）
+      wan_b: {}                       # 出口到 Internet
+    environment:
+      - DEVICE_TEMPLATE=singleport
+      - ROLE=exit
+      - WAN_IFACE=eth0
     volumes:
       - ./configs/node-b:/etc/easytier:ro
     depends_on:
       - web
 
-  # ── C: Control Plane (Ubuntu) ──
+  # ── C: Control Plane ──
+  # Ubuntu server running easytier-web + config-server + relay
   web:
     build:
       context: .
@@ -88,7 +114,9 @@ services:
     volumes:
       - ./configs/web:/etc/easytier:ro
 
-  # ── D: Client behind A ──
+  # ── D: Client behind A's LAN ──
+  # Ubuntu desktop/laptop connected to A's LAN port
+  # Default gateway points to A — all Internet traffic goes through A
   client-d:
     build:
       context: .
@@ -103,9 +131,9 @@ services:
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
-        # D's only route to outside is through A
+        # D's only route to outside is through A's LAN interface
         ip route replace default via 192.168.1.1
-        echo "client-d ready, default gw -> 192.168.1.1 (node-a)"
+        echo "client-d ready, default gw -> 192.168.1.1 (node-a LAN)"
         sleep infinity
     depends_on:
       - node-a

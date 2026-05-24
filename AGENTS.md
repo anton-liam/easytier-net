@@ -5,54 +5,101 @@
 在 EasyTier 组网基础上，实现 D → A → B → Internet 的出口网关策略编排。
 C 作为控制面，通过 EasyTier 已有通道下发策略，A/B 接收并执行 nft/route 规则。
 
+## 硬件设备模型
+
+### 双口设备（dualport）— NanoPi R3S
+
+模拟真实 NanoPi R3S 运行 iStoreOS 的环境。双网口：
+
+```
+         WAN (eth0)                LAN (eth1 / br-lan)
+           │                            │
+    连接上游网络/underlay            连接下游子网设备 (D)
+```
+
+- WAN 口：接入上游网络（underlay），也是 EasyTier 组网通道
+- LAN 口：作为网关为下游设备（D）提供出网服务
+- iStoreOS 默认配置：eth0=WAN, eth1=LAN(br-lan)
+
+**用作 Source 网关（A）时**：D 连 LAN 口，受管流量从 WAN 口经 EasyTier tunnel 发往 B。
+
+### 单口设备（singleport）— Raspberry Pi 4/5
+
+模拟 Raspberry Pi 4 或 5 运行 iStoreOS 的环境。仅一个网口：
+
+```
+         eth0 (唯一网口)
+           │
+    同时承担 WAN 接入 + EasyTier 组网
+```
+
+- 单口接入上游网络，作为旁路由
+- 无独立 LAN 口，不直连下游客户端
+- iStoreOS 默认配置：eth0=LAN(br-lan)，WAN 通过 DHCP client 或手动配置
+
+**用作 Exit 网关（B）时**：只需接入 WAN（上游网络），接收 tunnel 流量并 masquerade 出网。无需 LAN 口。
+
+### 网口差异对策略的影响
+
+| 设备模板 | 网口 | 可承担角色 | nft mark 的 iif |
+|----------|------|-----------|-----------------|
+| dualport (R3S) | WAN + LAN | Source 或 Exit | `iif "br-lan"` (LAN 口) |
+| singleport (RPi) | 仅 WAN | **仅 Exit** | 不需要 mark（只做 masquerade） |
+
+Gateway 模块根据设备角色（source/exit）决定行为，不需要暴露网口细节给 Web 用户。
+
 ## 网络拓扑
 
 ```
-                      underlay (192.168.64.0/24)
-                ┌───────────┬───────────┬───────────┐
-                │           │           │           │
-          ┌─────┴─────┐ ┌──┴──────┐ ┌──┴──────┐   │
-          │  A (src)  │ │ B (exit)│ │    C    │   │
-          │ iStoreOS  │ │ iStoreOS│ │  Ubuntu │   │
-          │ .8        │ │ .3      │ │  .4     │   │
-          │           │ │         │ │         │   │
-          │ easytier  │ │ easytier│ │ easytier│   │
-          │  + gateway│ │  + gate │ │  -web   │   │
-          │   module  │ │  module │ │         │   │
-          └─────┬─────┘ └────┬────┘ └─────────┘   │
-                │            │                      │
-    ┌───────────┤            │                      │
-    │  EasyTier tunnel       │                      │
-    │  (tun0: 10.126.126.x)  │                      │
-    │           │            │                      │
-    │      lan  │       wan  │                      │
-    │ 192.168.1.0/24    (NAT to Internet)           │
-    │           │                                    │
-          ┌─────┴─────┐                              │
-          │     D     │                              │
-          │  Ubuntu   │                              │
-          │  .2       │                              │
-          │ (client)  │                              │
-          └───────────┘
+                        underlay (192.168.64.0/24)
+                  ┌───────────┬───────────┬───────────┐
+                  │           │           │           │
+          ┌───────┴───────┐ ┌─┴─────────┐ ┌─┴───────┐
+          │  A (source)   │ │ B (exit)  │ │    C    │
+          │  NanoPi R3S   │ │ RPi4/5 或 │ │  Ubuntu │
+          │  iStoreOS     │ │ R3S       │ │         │
+          │               │ │ iStoreOS  │ │         │
+          │  WAN: .8 ─────│─│── .3 ─────│─│── .4    │
+          │  LAN: 192.168.│ │           │ │         │
+          │       1.1     │ │  eth0     │ │easytier │
+          │               │ │  (单口)   │ │ -web    │
+          │  easytier-core│ │           │ │         │
+          │  + gateway mod│ │ easytier  │ │         │
+          └───────┬───────┘ │ + gateway │ └─────────┘
+                  │         └─────┬─────┘
+    ┌─────────────┤               │
+    │  EasyTier tunnel (tun0)     │
+    │  10.126.126.0/24            │
+    │             │               │
+    │    LAN 口   │          WAN  │
+    │ 192.168.1.0/24     (NAT → Internet)
+    │             │
+          ┌───────┴───────┐
+          │       D       │
+          │    Ubuntu     │
+          │   .2 (client) │
+          │               │
+          │ 默认网关→A LAN │
+          └───────────────┘
 ```
 
 ### 节点职责
 
-| 节点 | OS | 角色 | 运行的服务 |
-|------|------|------|------|
-| A | iStoreOS (OpenWrt) | Source 网关 | easytier-core（含 gateway 模块） |
-| B | iStoreOS (OpenWrt) | Exit 网关 | easytier-core（含 gateway 模块） |
-| C | Ubuntu | 控制面 | easytier-web + config-server + relay |
-| D | Ubuntu | 客户端 | 无，仅作为流量源 |
+| 节点 | 硬件模型 | OS | 角色 | 网口 | 运行的服务 |
+|------|----------|------|------|------|------|
+| A | NanoPi R3S (dualport) | iStoreOS | Source 网关 | WAN(eth0) + LAN(eth1/br-lan) | easytier-core + gateway 模块 |
+| B | RPi4/5 或 R3S (singleport/dualport) | iStoreOS | Exit 网关（旁路由） | eth0（接入 WAN） | easytier-core + gateway 模块 |
+| C | 通用 x86/arm | Ubuntu | 控制面 | eth0 | easytier-web + config-server + relay |
+| D | 任意 | Ubuntu | 客户端 | eth0（连 A LAN） | 无，仅作为流量源 |
 
 ### 网络划分
 
-| 网络 | 网段 | 用途 |
-|------|------|------|
-| underlay | 192.168.64.0/24 | A/B/C 物理互联 |
-| lan_a | 192.168.1.0/24 | D 连接 A 的 LAN 口 |
-| tunnel | 10.126.126.0/24 | EasyTier 虚拟网络 |
-| wan_b | Docker NAT | B 出口到 Internet |
+| 网络 | 网段 | 用途 | 连接节点 |
+|------|------|------|------|
+| underlay | 192.168.64.0/24 | A/B/C 物理互联（WAN 侧） | A(WAN), B(eth0), C(eth0) |
+| lan_a | 192.168.1.0/24 | D 连接 A 的 LAN 口 | A(LAN), D |
+| tunnel | 10.126.126.0/24 | EasyTier 虚拟网络 | A(tun0), B(tun0), C(tun0) |
+| wan_b | NAT / 公网 | B 出口到 Internet | B(eth0 出向) |
 
 ## 流量路径
 
