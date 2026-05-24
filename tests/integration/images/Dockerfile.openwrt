@@ -1,0 +1,27 @@
+# A/B nodes: OpenWrt rootfs with nftables + iproute2
+# Provides UCI, procd, fw4, nftables — close to real iStoreOS
+
+FROM openwrt/rootfs:x86_64-24.10.1
+
+# Install required packages for gateway functionality
+RUN mkdir -p /var/lock && \
+    opkg update && \
+    opkg install \
+      nftables \
+      ip-full \
+      kmod-nft-nat \
+      kmod-tun \
+      curl \
+      ca-bundle \
+      bash \
+      procps-ng-ps \
+      tcpdump && \
+    rm -f /tmp/opkg-lists/*
+
+# EasyTier binaries will be downloaded or mounted at runtime
+# Config mounted at /etc/easytier/
+
+COPY entrypoint-openwrt.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+ENTRYPOINT ["/entrypoint.sh"]

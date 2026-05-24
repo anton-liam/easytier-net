@@ -1,0 +1,22 @@
+# C (web/control) and D (client) nodes
+
+FROM ubuntu:24.04
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      iproute2 \
+      iputils-ping \
+      nftables \
+      curl \
+      ca-certificates \
+      tcpdump \
+      procps \
+      jq \
+    && rm -rf /var/lib/apt/lists/*
+
+# TODO: C will run easytier-web + easytier-core (config-server mode)
+# Binaries downloaded or mounted at runtime
+
+COPY entrypoint-ubuntu.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+ENTRYPOINT ["/entrypoint.sh"]
