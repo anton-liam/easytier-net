@@ -1,15 +1,25 @@
 # EasyTier Gateway Integration Lab
 #
+# IMPORTANT: 在真实部署中，A/B/C 处于三个不同物理网络（不同地域/运营商）。
+# 它们通过 EasyTier 组网互达，A/B 之间不一定有直接物理连通。
+# Docker 测试中用 underlay 网络简化模拟，但设计上不能假设 A/B 同一局域网。
+#
 # Hardware simulation:
-#   A = NanoPi R3S (dualport): WAN(eth0) + LAN(eth1/br-lan)
-#   B = RPi4/5 or R3S (singleport as exit): eth0 only
-#   C = Ubuntu server (control plane)
-#   D = Ubuntu client (behind A's LAN)
+#   A = NanoPi R3S (dualport, iStoreOS): WAN(eth0) + LAN(eth1/br-lan)
+#   B = RPi4/5 or R3S (singleport, iStoreOS): eth0 only (旁路由出口)
+#   C = Ubuntu server (控制面)
+#   D = Ubuntu client (A 的子网设备，只能通过 A 出网)
+#
+# Network relationships:
+#   - A 能访问 C (通过 EasyTier 或 underlay)
+#   - B 能访问 C (通过 EasyTier 或 underlay)
+#   - D 是 A 的子网设备，默认网关指向 A，只能通过 A 出网
+#   - A/B 之间通过 EasyTier tunnel 互达
 #
 # Topology:
-#   D --[lan_a: A's LAN port]--> A --[underlay: A's WAN port]--> B --[wan_b]--> Internet
-#                                         |
-#                                    C (control plane)
+#   D --[lan_a: A's LAN port]--> A --[EasyTier tunnel]--> B --[wan_b]--> Internet
+#                                         |                    |
+#                                         └── C (control) ─────┘
 #
 # Usage:
 #   docker compose up -d
@@ -42,12 +52,12 @@ networks:
 services:
   # ── A: Source Gateway ──
   # Simulates: NanoPi R3S (dualport) running iStoreOS
-  # eth0 = WAN (underlay, EasyTier 组网通道)
-  # eth1 = LAN (br-lan, 下游子网设备 D 连接此口)
+  # eth0 = WAN (接入上游网络, EasyTier 通过此口组网连接 C)
+  # eth1 = LAN (br-lan, D 作为子网设备连接此口, 通过 A 出网)
   node-a:
     build:
       context: .
-      dockerfile: images/Dockerfile.openwrt
+      dockerfile: images/Dockerfile.istoreos
     hostname: node-a
     privileged: true
     cap_add:
@@ -71,14 +81,14 @@ services:
       - web
 
   # ── B: Exit Gateway ──
-  # Simulates: Raspberry Pi 4/5 (singleport) or R3S as exit
-  # Running iStoreOS as bypass/exit router
-  # eth0 = WAN only (接入上游网络, 出口到 Internet)
-  # No LAN port needed — only receives tunnel traffic and masquerades out
+  # Simulates: RPi4/5 (singleport) or R3S as exit, running iStoreOS
+  # 作为旁路由出口节点，与 A 不在同一物理网络
+  # eth0 = 唯一网口 (接入 B 所在网络, 通过此口 EasyTier 组网 + 出口到 Internet)
+  # No LAN port — only receives tunnel traffic and masquerades out
   node-b:
     build:
       context: .
-      dockerfile: images/Dockerfile.openwrt
+      dockerfile: images/Dockerfile.istoreos
     hostname: node-b
     privileged: true
     cap_add:

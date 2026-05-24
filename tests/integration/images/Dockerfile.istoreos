@@ -1,9 +1,10 @@
-# A/B nodes: OpenWrt rootfs with nftables + iproute2
-# Provides UCI, procd, fw4, nftables — close to real iStoreOS
+# A/B nodes: iStoreOS base image
+# iStoreOS is based on OpenWrt, provides UCI, procd, fw4, nftables
+# Docker uses openwrt/rootfs as base since iStoreOS doesn't publish container images
 
 FROM openwrt/rootfs:x86_64-24.10.1
 
-# Install required packages for gateway functionality
+# Install packages that iStoreOS ships by default on R3S/RPi
 RUN mkdir -p /var/lock && \
     opkg update && \
     opkg install \
@@ -21,7 +22,7 @@ RUN mkdir -p /var/lock && \
 # EasyTier binaries will be downloaded or mounted at runtime
 # Config mounted at /etc/easytier/
 
-COPY entrypoint-openwrt.sh /entrypoint.sh
+COPY entrypoint-istoreos.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 ENTRYPOINT ["/entrypoint.sh"]

@@ -5,6 +5,20 @@
 在 EasyTier 组网基础上，实现 D → A → B → Internet 的出口网关策略编排。
 C 作为控制面，通过 EasyTier 已有通道下发策略，A/B 接收并执行 nft/route 规则。
 
+## 网络前提
+
+A、B、C 分别处于**三个不同的物理网络**（可能是不同地域、不同运营商）。
+它们通过 EasyTier 组网后形成虚拟子网互通。
+
+关键约束：
+- A 能访问 C（通过 EasyTier 或直连 underlay）
+- B 能访问 C（通过 EasyTier 或直连 underlay）
+- D 是 A 的子网设备，只能通过 A 出网
+- A 和 B 之间**不一定有直接物理连通**，靠 EasyTier tunnel 互达
+
+在 Docker 集成测试中，用同一个 underlay 网络简化模拟三者互通。
+但设计上不能假设 A/B 处于同一局域网。
+
 ## 硬件设备模型
 
 ### 双口设备（dualport）— NanoPi R3S
@@ -275,13 +289,13 @@ cleanup_all_rules();  // 删除 nft table + ip rule + ip route
 
 ### Docker 集成测试
 
-使用 Docker Compose 编排完整拓扑，A/B 使用 OpenWrt rootfs 镜像（有 UCI/procd/fw4/nftables），C/D 使用 Ubuntu。
+使用 Docker Compose 编排完整拓扑，A/B 使用 iStoreOS rootfs 镜像（有 UCI/procd/fw4/nftables），C/D 使用 Ubuntu。
 
 ```
 tests/integration/
 ├── docker-compose.yml
 ├── images/
-│   ├── Dockerfile.openwrt    # A/B 基础镜像
+│   ├── Dockerfile.istoreos   # A/B 基础镜像 (iStoreOS)
 │   └── Dockerfile.ubuntu     # C/D 基础镜像
 ├── scripts/
 │   ├── test-gateway-forward.sh       # D→A→B→Internet
