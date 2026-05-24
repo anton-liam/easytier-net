@@ -23,7 +23,7 @@ A、B、C 分别处于**三个不同的物理网络**（可能是不同地域、
 
 ### 双口设备（dualport）— NanoPi R3S
 
-模拟真实 NanoPi R3S 运行 iStoreOS 的环境。双网口：
+模拟真实 NanoPi R3S 运行 OpenWrt 的环境。双网口：
 
 ```
          WAN (eth0)                LAN (eth1 / br-lan)
@@ -33,13 +33,13 @@ A、B、C 分别处于**三个不同的物理网络**（可能是不同地域、
 
 - WAN 口：接入上游网络（underlay），也是 EasyTier 组网通道
 - LAN 口：作为网关为下游设备（D）提供出网服务
-- iStoreOS 默认配置：eth0=WAN, eth1=LAN(br-lan)
+- OpenWrt 默认配置：eth0=WAN, eth1=LAN(br-lan)
 
 **用作 Source 网关（A）时**：D 连 LAN 口，受管流量从 WAN 口经 EasyTier tunnel 发往 B。
 
 ### 单口设备（singleport）— Raspberry Pi 4/5
 
-模拟 Raspberry Pi 4 或 5 运行 iStoreOS 的环境。仅一个网口：
+模拟 Raspberry Pi 4 或 5 运行 OpenWrt 的环境。仅一个网口：
 
 ```
          eth0 (唯一网口)
@@ -49,7 +49,7 @@ A、B、C 分别处于**三个不同的物理网络**（可能是不同地域、
 
 - 单口接入上游网络，作为旁路由
 - 无独立 LAN 口，不直连下游客户端
-- iStoreOS 默认配置：eth0=LAN(br-lan)，WAN 通过 DHCP client 或手动配置
+- OpenWrt 默认配置：eth0=LAN(br-lan)，WAN 通过 DHCP client 或手动配置
 
 **用作 Exit 网关（B）时**：只需接入 WAN（上游网络），接收 tunnel 流量并 masquerade 出网。无需 LAN 口。
 
@@ -71,8 +71,8 @@ Gateway 模块根据设备角色（source/exit）决定行为，不需要暴露�
           ┌───────┴───────┐ ┌─┴─────────┐ ┌─┴───────┐
           │  A (source)   │ │ B (exit)  │ │    C    │
           │  NanoPi R3S   │ │ RPi4/5 或 │ │  Ubuntu │
-          │  iStoreOS     │ │ R3S       │ │         │
-          │               │ │ iStoreOS  │ │         │
+          │  OpenWrt     │ │ R3S       │ │         │
+          │               │ │ OpenWrt  │ │         │
           │  WAN: .8 ─────│─│── .3 ─────│─│── .4    │
           │  LAN: 192.168.│ │           │ │         │
           │       1.1     │ │  eth0     │ │easytier │
@@ -101,8 +101,8 @@ Gateway 模块根据设备角色（source/exit）决定行为，不需要暴露�
 
 | 节点 | 硬件模型 | OS | 角色 | 网口 | 运行的服务 |
 |------|----------|------|------|------|------|
-| A | NanoPi R3S (dualport) | iStoreOS | Source 网关 | WAN(eth0) + LAN(eth1/br-lan) | easytier-core + gateway 模块 |
-| B | RPi4/5 或 R3S (singleport/dualport) | iStoreOS | Exit 网关（旁路由） | eth0（接入 WAN） | easytier-core + gateway 模块 |
+| A | NanoPi R3S (dualport) | OpenWrt | Source 网关 | WAN(eth0) + LAN(eth1/br-lan) | easytier-core + gateway 模块 |
+| B | RPi4/5 或 R3S (singleport/dualport) | OpenWrt | Exit 网关（旁路由） | eth0（接入 WAN） | easytier-core + gateway 模块 |
 | C | 通用 x86/arm | Ubuntu | 控制面 | eth0 | easytier-web + config-server + relay |
 | D | 任意 | Ubuntu | 客户端 | eth0（连 A LAN） | 无，仅作为流量源 |
 
@@ -290,7 +290,7 @@ cleanup_all_rules();  // 删除 nft table + ip rule + ip route
 ### Docker 集成测试
 
 开发宿主机为 Mac (Apple Silicon / arm64)。所有容器镜像使用 arm64 原生：
-- A/B：`ghcr.io/openwrt/rootfs:armsr-armv8`（arm64 原生 iStoreOS 基础，有 UCI/procd/fw4/nftables）
+- A/B：`ghcr.io/openwrt/rootfs:armsr-armv8`（arm64 原生，有 UCI/procd/fw4/nftables）
 - C/D：`ubuntu:24.04`（multi-arch，自动使用 arm64）
 - EasyTier 二进制：编译为 `aarch64-unknown-linux-musl` 目标
 
@@ -298,7 +298,7 @@ cleanup_all_rules();  // 删除 nft table + ip rule + ip route
 tests/integration/
 ├── docker-compose.yml
 ├── images/
-│   ├── Dockerfile.istoreos   # A/B 基础镜像 (iStoreOS)
+│   ├── Dockerfile.openwrt    # A/B 基础镜像 (OpenWrt)
 │   └── Dockerfile.ubuntu     # C/D 基础镜像
 ├── scripts/
 │   ├── test-gateway-forward.sh       # D→A→B→Internet
@@ -314,4 +314,4 @@ tests/integration/
 | 层级 | 工具 | 验证什么 | 频率 |
 |------|------|------|------|
 | 集成 | Docker Compose | 路由/nft/策略/回滚 | 每次提交 |
-| 验收 | UTM (3 VM) | iStoreOS 真机行为 | 发版前 |
+| 验收 | UTM (3 VM) | OpenWrt 真机行为 | 发版前 |

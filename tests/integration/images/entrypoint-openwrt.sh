@@ -23,7 +23,7 @@ fi
 ip -br addr show
 
 # TODO: start easytier-core here once binaries are available
-# On real iStoreOS, this is managed by procd init script:
+# On real device, this is managed by procd init script:
 #   easytier-core -w udp://192.168.64.4:22020/admin
 
 echo "[$(hostname)] ready"

@@ -5,8 +5,8 @@
 # Docker 测试中用 underlay 网络简化模拟，但设计上不能假设 A/B 同一局域网。
 #
 # Hardware simulation:
-#   A = NanoPi R3S (dualport, iStoreOS): WAN(eth0) + LAN(eth1/br-lan)
-#   B = RPi4/5 or R3S (singleport, iStoreOS): eth0 only (旁路由出口)
+#   A = NanoPi R3S (dualport, OpenWrt): WAN(eth0) + LAN(eth1/br-lan)
+#   B = RPi4/5 or R3S (singleport, OpenWrt): eth0 only (旁路由出口)
 #   C = Ubuntu server (控制面)
 #   D = Ubuntu client (A 的子网设备，只能通过 A 出网)
 #
@@ -51,13 +51,13 @@ networks:
 
 services:
   # ── A: Source Gateway ──
-  # Simulates: NanoPi R3S (dualport) running iStoreOS
+  # Simulates: NanoPi R3S (dualport) running OpenWrt
   # eth0 = WAN (接入上游网络, EasyTier 通过此口组网连接 C)
   # eth1 = LAN (br-lan, D 作为子网设备连接此口, 通过 A 出网)
   node-a:
     build:
       context: .
-      dockerfile: images/Dockerfile.istoreos
+      dockerfile: images/Dockerfile.openwrt
     hostname: node-a
     privileged: true
     cap_add:
@@ -81,14 +81,14 @@ services:
       - web
 
   # ── B: Exit Gateway ──
-  # Simulates: RPi4/5 (singleport) or R3S as exit, running iStoreOS
+  # Simulates: RPi4/5 (singleport) or R3S as exit, running OpenWrt
   # 作为旁路由出口节点，与 A 不在同一物理网络
   # eth0 = 唯一网口 (接入 B 所在网络, 通过此口 EasyTier 组网 + 出口到 Internet)
   # No LAN port — only receives tunnel traffic and masquerades out
   node-b:
     build:
       context: .
-      dockerfile: images/Dockerfile.istoreos
+      dockerfile: images/Dockerfile.openwrt
     hostname: node-b
     privileged: true
     cap_add:
