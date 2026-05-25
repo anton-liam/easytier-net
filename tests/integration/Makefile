@@ -1,5 +1,7 @@
 .PHONY: up down test test-forward test-rollback test-restore test-cleanup logs shell-a shell-b shell-c shell-d
 
+export PATH := /Applications/Docker.app/Contents/Resources/bin:$(PATH)
+
 COMPOSE := docker compose -f docker-compose.yml
 
 up:

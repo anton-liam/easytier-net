@@ -43,7 +43,11 @@ docker run --rm \
   bash -c '
     set -eu
 
-    rustup target add x86_64-unknown-linux-musl 2>/dev/null || true
+    # The repo pins channel "1.95"; rustup may try to sync that channel online.
+    # Use the already-cached full toolchain in the builder image for repeatable builds.
+    export RUSTUP_TOOLCHAIN=1.95.0
+
+    rustup target add x86_64-unknown-linux-musl
 
     # Build frontend first
     export CI=true

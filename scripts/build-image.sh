@@ -13,6 +13,19 @@ PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 DIST_DIR="$PROJECT_DIR/dist/images"
 EASYTIER_BIN="$PROJECT_DIR/dist/aarch64/easytier-core"
 
+if [ -f "$PROJECT_DIR/.env" ]; then
+  set -a
+  # shellcheck disable=SC1091
+  . "$PROJECT_DIR/.env"
+  set +a
+fi
+
+DEFAULT_CONFIG_SERVER="${EASYTIER_CONFIG_SERVER:-}"
+DEFAULT_ENABLED="0"
+if [ -n "$DEFAULT_CONFIG_SERVER" ]; then
+  DEFAULT_ENABLED="1"
+fi
+
 mkdir -p "$DIST_DIR"
 
 # Check that easytier-core aarch64 binary exists
@@ -45,6 +58,11 @@ case "$TARGET" in
 esac
 
 echo "=== Building OpenWrt image for $TARGET ($PROFILE) ==="
+if [ -n "$DEFAULT_CONFIG_SERVER" ]; then
+  echo "=== Default config-server: $DEFAULT_CONFIG_SERVER ==="
+else
+  echo "=== Default config-server: disabled (set EASYTIER_CONFIG_SERVER in .env to enable) ==="
+fi
 
 docker run --rm \
   -v "$DIST_DIR":/dist \
@@ -91,10 +109,13 @@ STOP=10
 USE_PROCD=1
 
 start_service() {
+    local enabled
     local config_server
     config_load easytier
+    config_get_bool enabled core enabled 0
     config_get config_server core config_server ''
 
+    [ "\$enabled" = "1" ] || return
     [ -z \"\$config_server\" ] && return
 
     procd_open_instance
@@ -112,8 +133,8 @@ INITEOF
 #!/bin/sh
 uci -q batch <<-EOT
     set easytier.core=easytier
-    set easytier.core.enabled='0'
-    set easytier.core.config_server=''
+    set easytier.core.enabled='$DEFAULT_ENABLED'
+    set easytier.core.config_server='$DEFAULT_CONFIG_SERVER'
     commit easytier
 EOT
 /etc/init.d/easytier enable

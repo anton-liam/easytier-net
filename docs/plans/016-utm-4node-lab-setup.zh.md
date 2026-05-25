@@ -1,178 +1,372 @@
-# UTM 4 节点测试环境搭建计划
+# UTM 4 节点 gateway_policy 验收计划
 
-## Context
+## 目标
 
-gateway_policy 模块代码和 Docker 集成测试已全部完成（21 tests pass）。现在需要在 UTM 虚拟机中搭建真实 4 节点环境，模拟 3 个异地网络，验证端到端 gateway policy。
+在 UTM 中搭建 A/B/C/D 四节点环境，验证当前 `gateway_policy` 方案是否能稳定实现：
 
-**硬件环境**：Mac Apple Silicon (ARM64)，UTM 虚拟化
-- A/B: OpenWrt 25.12.4 空白系统（aarch64）
-- C/D: Ubuntu（同模板克隆，需改 MAC）
-
-## 实际网络拓扑
-
-UTM 自动分配的网段：
-- **Shared 网络 (bridge100)**: 192.168.64.0/24，网关 192.168.64.1
-- **Host 网络 (bridge101)**: 192.168.128.0/24，网关 192.168.128.1
-
-```
-  站点 1 (A 的 LAN 侧)                   UTM 共享网络 (模拟骨干/互联网)
-  192.168.128.0/24 (Host)                 192.168.64.0/24 (Shared)
-  ┌─────────────┐                         ┌───────────────────────────────┐
-  │ D: .2       │                         │  宿主机: .1 (可访问 C Web)    │
-  │ Ubuntu      │                         │  A eth0: DHCP→.x             │
-  │ gw → A      │                         │  B eth0: DHCP→.x             │
-  └──────┬──────┘                         │  C eth0: .4 (已有)            │
-         │ (Host 网络)                    └───────────────────────────────┘
-    A eth1/br-lan: .254                          │          │
-                                            站点 2 (B)  站点 3 (C)
-                                            只有 WAN    Web 控制面
+```text
+D(client) -> A(source/OpenWrt) -> EasyTier tunnel -> B(exit/OpenWrt) -> Internet
 ```
 
-| VM | 角色 | 网卡 | IP | 子网 | MAC |
-|----|------|------|----|------|-----|
-| A  | Source GW (双口) | eth0 (WAN) | DHCP 或静态 | Shared 192.168.64.0/24 | 3A:0C:8C:7D:72:47 |
-|    |                  | eth1 (LAN) | 192.168.128.254 | Host 192.168.128.0/24 | 8E:4F:6E:AC:34:2F |
-| B  | Exit GW (单口) | eth0 | DHCP 或静态 | Shared 192.168.64.0/24 | 36:2C:D8:10:0F:2F |
-| C  | 控制面 Web | eth0 | 192.168.64.4 | Shared 192.168.64.0/24 | 6E:77:0D:65:D6:70 |
-| D  | 客户端 | eth0 | 192.168.128.2 (DHCP) | Host 192.168.128.0/24 | E6:8E:03:51:D8:AE |
+本计划只验证当前干净实现：
+- A/B 运行 OpenWrt
+- C 运行 Ubuntu，部署 `easytier-core` config-server 和 `easytier-web`
+- D 运行 Ubuntu，作为 A LAN 侧客户端
+- 不使用旧 agent
+- 策略通过 Web 的 `gateway_policy` pair API 下发
 
-## 已完成
+## 验收边界
 
-### 步骤 1: VM 配置（通过修改 .utm/config.plist）✅
+必须验证：
+- A/B 能通过 `easytier-core -w udp://C:22020/admin` 连接 C
+- C 的 Web Device List 能看到 A/B 在线
+- C 能通过 pair API 一次指定 Source/Exit 并下发策略
+- D 的公网出口表现为 B
+- D -> A 本机访问不被策略捕获
+- A/B/C 控制面互联不因策略失联
+- 删除策略后 A/B 网络规则清理干净
+- EasyTier tunnel 异常时策略自动回滚
 
-- 4 台 VM MAC 全部唯一
-- A: 双网卡 Shared + Host
-- D: Host-Only 模式（只能通过 A 出网）
-- B/C: Shared 模式
+暂不验证：
+- iStoreOS 镜像
+- 独立 agent
+- LuCI 页面交互细节
+- HIL 真机测试台
 
-## 当前阻塞
+## UTM 网络拓扑
 
-### C/D (Ubuntu): SSH 未安装
-- 网络可达（C=192.168.64.4, D=192.168.128.2）
-- `Connection refused` — 需要在 UTM 控制台安装 openssh-server
+UTM 当前用两个网络模拟“客户端 LAN”和“外部/骨干网络”：
 
-### A/B (OpenWrt 25.12.4): 默认 IP 不可达
-- OpenWrt 默认 LAN IP 为 192.168.1.1，不在 Shared/Host 子网内
-- 从宿主机无法 SSH
-- 需要先通过 UTM 控制台配置 WAN 接口 DHCP 或静态 IP
+| 网络 | 网段 | 用途 |
+|------|------|------|
+| Shared 网络 | `192.168.64.0/24` | A WAN、B WAN、C 控制面所在网络 |
+| Host 网络 | `192.168.128.0/24` | A LAN 和 D 客户端网络 |
+| EasyTier tunnel | `10.126.126.0/24` | A/B/C 组网后的虚拟网络 |
 
-## 待执行步骤
-
-### 步骤 2: 初始化 SSH 访问（需要 UTM 控制台手动操作）
-
-**C (Ubuntu 控制台)**：
-```sh
-sudo apt update && sudo apt install -y openssh-server
+```text
+            Shared / underlay: 192.168.64.0/24
+      ┌────────────────────────────────────────────┐
+      │ A WAN              B WAN              C    │
+      │ OpenWrt            OpenWrt            Ubuntu
+      │ eth0               eth0               eth0 │
+      └──────┬──────────────┬──────────────────┬───┘
+             │              │                  │
+             │        EasyTier tunnel          │
+             │        10.126.126.0/24          │
+             │              │                  │
+      ┌──────┴──────┐       │                  │
+      │ A LAN       │       │                  │
+      │ br-lan/eth1 │       │                  │
+      │ 192.168.128.254     │                  │
+      └──────┬──────┘       │                  │
+             │ Host / LAN: 192.168.128.0/24    │
+      ┌──────┴──────┐                          │
+      │ D Ubuntu    │                          │
+      │ default gw  │                          │
+      │ -> A LAN    │                          │
+      └─────────────┘                          │
 ```
 
-**D (Ubuntu 控制台)**：
-```sh
-sudo apt update && sudo apt install -y openssh-server
-```
+## 节点角色
 
-**A (OpenWrt 控制台)** — 配置 WAN 口获取共享网络 IP：
-```sh
-# 查看接口
-ip addr show
-# 配置 WAN (eth0) 为 DHCP
-uci set network.wan=interface
-uci set network.wan.device='eth0'
-uci set network.wan.proto='dhcp'
-uci commit network
-/etc/init.d/network restart
-# 验证
-ip addr show eth0
-```
+| 节点 | OS | 角色 | 必要服务 |
+|------|----|------|----------|
+| A | OpenWrt | Source 网关 | `easytier-core -w` + `gateway_policy` |
+| B | OpenWrt | Exit 网关 | `easytier-core -w` + `gateway_policy` |
+| C | Ubuntu | 控制面和搭线节点 | `easytier-core` config-server + `easytier-web` |
+| D | Ubuntu | 客户端 | 无 EasyTier，仅作为流量源 |
 
-**B (OpenWrt 控制台)** — 同样配置：
+## 初始网络配置
+
+### A: Source/OpenWrt
+
+WAN 口使用 Shared 网络：
+
 ```sh
 uci set network.wan=interface
 uci set network.wan.device='eth0'
 uci set network.wan.proto='dhcp'
 uci commit network
 /etc/init.d/network restart
-ip addr show eth0
 ```
 
-### 步骤 3: 远程配置网络（SSH 可达后自动化）
+LAN 口使用 Host 网络，供 D 接入：
 
-**A**：
 ```sh
-# WAN 保持 DHCP（已配）
-# LAN 改为 192.168.128.254
 uci set network.lan.ipaddr='192.168.128.254'
 uci set network.lan.netmask='255.255.255.0'
 uci commit network
 /etc/init.d/network restart
 ```
 
-**D**：
+### B: Exit/OpenWrt
+
+B 只需要 WAN 接入 Shared 网络：
+
 ```sh
-# 静态 IP + 网关指向 A
+uci set network.wan=interface
+uci set network.wan.device='eth0'
+uci set network.wan.proto='dhcp'
+uci commit network
+/etc/init.d/network restart
+```
+
+### C: Ubuntu
+
+C 使用 Shared 网络，固定或 DHCP 获取可访问 IP，例如：
+
+```text
+192.168.64.4
+```
+
+需要能从宿主机访问：
+
+```text
+http://192.168.64.4:11211
+```
+
+### D: Ubuntu Client
+
+D 使用 Host 网络，默认网关指向 A LAN：
+
+```sh
 sudo ip addr flush dev enp0s1
 sudo ip addr add 192.168.128.100/24 dev enp0s1
 sudo ip route replace default via 192.168.128.254
 ```
 
-### 步骤 4: 编译 aarch64 二进制
+## 构建产物
+
+当前构建命令：
 
 ```sh
-make build TARGET=aarch64-linux
-# 产出: dist/aarch64-linux/{easytier-core, easytier-web-embed, easytier-agent}
+make build-server
+make build-openwrt
 ```
 
-### 步骤 5: 创建 inventory.env
+产物：
+
+```text
+dist/x86_64/easytier-core
+dist/x86_64/easytier-web
+dist/aarch64/easytier-core
+```
+
+OpenWrt 镜像构建可通过 `.env` 指定默认 C 端地址：
 
 ```env
-UTM_A_HOST=<A 的 Shared IP>
-UTM_A_USER=root
-UTM_A_MACHINE_ID=aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa
-UTM_A_EASYTIER_IPV4=10.126.126.2
-UTM_A_LAN_IP=192.168.128.254
-UTM_A_MANAGED_CIDRS=192.168.128.0/24
-
-UTM_B_HOST=<B 的 Shared IP>
-UTM_B_USER=root
-UTM_B_MACHINE_ID=bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb
-UTM_B_EASYTIER_IPV4=10.126.126.3
-
-UTM_C_HOST=192.168.64.4
-UTM_C_USER=anton
-UTM_C_PASSWORD=anton
-UTM_WEB_URL=http://192.168.64.4:11211
-UTM_CONFIG_SERVER=udp://192.168.64.4:22020/admin
-
-UTM_D_HOST=192.168.128.100
-UTM_D_USER=anton
-UTM_D_PASSWORD=anton
+EASYTIER_CONFIG_SERVER=udp://192.168.64.4:22020/admin
 ```
 
-### 步骤 6: 部署 C + A/B 并组网
+`.env` 不进入 git；示例见 `.env.example`。
+
+## 部署步骤
+
+### 1. 部署 C
+
+上传并运行：
 
 ```sh
-make utm-deploy-web                    # 部署 C 控制台
-scp easytier-core/agent 到 A/B         # 部署二进制
-make utm-configure-core-webclient      # A/B 组网注册
-make utm-configure-agent-service       # A/B 策略代理
+dist/x86_64/easytier-core
+dist/x86_64/easytier-web
 ```
 
-### 步骤 7: 验证
+C 需要提供：
+- EasyTier config-server：`udp://192.168.64.4:22020/admin`
+- Web 控制台：`http://192.168.64.4:11211`
+
+### 2. 部署 A/B
+
+上传：
 
 ```sh
-D → A (192.168.128.254)   ping
-A → B (Shared IP)         ping
-A → C (192.168.64.4)      ping
-A tun0 ↔ B tun0           ping (10.126.126.x)
-C Web 设备列表包含 A、B
-make utm-stability-test
+dist/aarch64/easytier-core -> /usr/bin/easytier-core
 ```
 
-## 关键文件
+启动：
 
-| 文件 | 用途 |
-|------|------|
-| `targets/aarch64-linux/build-in-docker.sh` | 编译 aarch64 二进制 |
-| `scripts/utm-deploy-web.sh` | 部署 C 控制台 |
-| `scripts/utm-configure-core-webclient.sh` | A/B 组网注册 |
-| `scripts/utm-configure-agent-service.sh` | A/B 策略代理 |
-| `tests/utm/inventory.env.example` | 环境变量模板 |
+```sh
+/usr/bin/easytier-core -w udp://192.168.64.4:22020/admin
+```
+
+正式镜像验收时，应通过 OpenWrt procd 服务启动。
+
+### 3. Web 组网验证
+
+在 C 的 Web 控制台验证：
+- A 在线
+- B 在线
+- A/B 有各自 machine id
+- A/B 已进入同一 EasyTier network instance
+- A tunnel IP 和 B tunnel IP 可确认
+
+## 策略下发
+
+通过 pair API 一次编排 A/B：
+
+```http
+POST /api/v1/gateway-policy/pair
+```
+
+示例 payload：
+
+```json
+{
+  "policy_id": "utm-gw-001",
+  "source_machine_id": "<A_MACHINE_ID>",
+  "exit_machine_id": "<B_MACHINE_ID>",
+  "managed_cidrs": ["192.168.128.0/24"],
+  "ingress_iface": "br-lan",
+  "easytier_iface": "tun0",
+  "exit_peer_tun_ip": "<B_TUN_IP>",
+  "exit_wan_iface": "eth0"
+}
+```
+
+下发顺序要求：
+1. C 先下发 Exit 策略到 B
+2. C 再下发 Source 策略到 A
+3. 如果 A 下发失败，C 必须回滚 B
+
+## 验收命令
+
+### 基础连通
+
+```sh
+# D -> A LAN
+ping -c 3 192.168.128.254
+
+# A -> C underlay
+ping -c 3 192.168.64.4
+
+# A -> B tunnel
+ping -c 3 <B_TUN_IP>
+
+# B -> A tunnel
+ping -c 3 <A_TUN_IP>
+```
+
+### 出口流量
+
+在 D 上：
+
+```sh
+curl -4 https://ifconfig.me
+curl -4 https://api.ipify.org
+```
+
+预期：
+- 返回 IP 应表现为 B 的出口
+- 不能表现为 A 的出口
+
+### 本机访问不被捕获
+
+在 D 上：
+
+```sh
+ping -c 3 192.168.128.254
+ssh root@192.168.128.254
+```
+
+预期：
+- D 访问 A 本机正常
+- 该流量不走 B
+
+### 控制面不失联
+
+策略启用后验证：
+
+```sh
+# A 上
+ping -c 3 192.168.64.4
+
+# B 上
+ping -c 3 192.168.64.4
+```
+
+预期：
+- A/B 仍可访问 C
+- Web Device List 仍显示 A/B 在线
+
+### 策略规则检查
+
+A 上应能看到：
+
+```sh
+nft list table inet easytier_gw
+ip rule show | grep 0x7e
+ip route show table 126
+```
+
+B 上应能看到：
+
+```sh
+nft list table inet easytier_gw
+```
+
+B 至少应包含：
+- postrouting masquerade
+- tunnel -> WAN forward accept
+- WAN -> tunnel established/related forward accept
+- OpenWrt fw4 forward 链中带 `easytier_gw` comment 的兼容规则（如果 fw4 存在）
+
+## 策略删除验收
+
+通过 pair remove API：
+
+```http
+POST /api/v1/gateway-policy/pair/remove
+```
+
+payload 与 pair 下发一致，至少需要：
+
+```json
+{
+  "policy_id": "utm-gw-001",
+  "source_machine_id": "<A_MACHINE_ID>",
+  "exit_machine_id": "<B_MACHINE_ID>",
+  "managed_cidrs": ["192.168.128.0/24"],
+  "ingress_iface": "br-lan",
+  "exit_peer_tun_ip": "<B_TUN_IP>",
+  "exit_wan_iface": "eth0"
+}
+```
+
+删除后验证：
+
+```sh
+# A
+ip rule show | grep 0x7e
+ip route show table 126
+nft list table inet easytier_gw
+
+# B
+nft list table inet easytier_gw
+```
+
+预期：
+- A 无 fwmark 0x7e rule
+- A table 126 为空
+- A/B 无 `inet easytier_gw` table
+- OpenWrt fw4 中无 `easytier_gw` comment 规则
+
+## 异常回滚验收
+
+模拟 tunnel 异常：
+
+```sh
+# A 上临时停止 easytier-core 或删除 tun0
+/etc/init.d/easytier stop
+```
+
+预期：
+- `gateway_policy` run loop 检测 tunnel 异常
+- A 自动 cleanup
+- D 不应继续错误地被导向不可达 B
+- A/B/C 控制面恢复后可重新下发策略
+
+## 当前注意事项
+
+- `016` 是 UTM 端到端验收计划，不是代码实现计划。
+- 代码实现以 `017-gateway-policy-minimal-downlink.zh.md` 为准。
+- Docker 集成测试后续应改为产品路径：Web REST -> RPC -> gateway_policy executor，而不是手写 nft/ip 命令。

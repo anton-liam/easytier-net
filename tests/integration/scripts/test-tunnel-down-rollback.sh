@@ -1,76 +1,57 @@
 #!/bin/bash
-# Test: tunnel down → auto rollback
-#
-# Simulates tunnel loss by removing the policy route next-hop,
-# verifies that cleanup restores A/B to clean state.
-#
-# Usage: ./test-tunnel-down-rollback.sh
+# Test: exit peer loss makes Source gateway auto-clean its policy rules.
 
 set -eu
 
-COMPOSE="docker compose -f $(dirname "$0")/../docker-compose.yml"
+source "$(dirname "$0")/lib-gateway.sh"
+
 PASS=0
 FAIL=0
 
 pass() { echo "  PASS: $1"; PASS=$((PASS + 1)); }
 fail() { echo "  FAIL: $1"; FAIL=$((FAIL + 1)); }
 
-echo "=== Setup: apply policy ==="
+echo "=== Preparing clean gateway state ==="
+login_web
+remove_pair_policy >/dev/null 2>&1 || true
+cleanup_all_rules
+compose up -d node-b >/dev/null
 
-$COMPOSE exec -T node-a sh -c '
-  nft add table inet easytier_gw
-  nft add chain inet easytier_gw prerouting "{ type filter hook prerouting priority -150; }"
-  nft add rule inet easytier_gw prerouting ip saddr 10.99.1.100 ip daddr != 10.99.1.0/24 meta mark set 0x7e
-  ip rule add fwmark 0x7e table 126 2>/dev/null || true
-  ip route replace default via 10.99.1.3 dev eth0 table 126
-'
+echo "=== Applying pair policy through easytier-web ==="
+wait_apply_pair_policy >/dev/null
 
-echo ""
-echo "=== Simulating tunnel down: flush policy route ==="
-
-# In real scenario, gateway module detects peer unreachable and runs cleanup
-# Here we simulate the rollback action
-$COMPOSE exec -T node-a sh -c '
-  ip rule del fwmark 0x7e table 126 2>/dev/null || true
-  ip route flush table 126 2>/dev/null || true
-  nft delete table inet easytier_gw 2>/dev/null || true
-'
+echo "=== Simulating exit peer/tunnel loss by stopping B ==="
+compose stop node-b >/dev/null
+sleep 12
 
 echo ""
-echo "=== Verify clean state ==="
-
-echo ""
-echo "--- Test 1: no policy rules on A ---"
-RULES=$($COMPOSE exec -T node-a ip rule show 2>/dev/null | grep -c "fwmark 0x7e" || true)
-if [ "$RULES" -eq 0 ]; then
-  pass "No policy rules after rollback"
+echo "--- Test 1: A auto-rolled back gateway rules ---"
+if assert_no_gateway_rules node-a; then
+  pass "A cleaned policy after peer loss"
 else
-  fail "Policy rules still present ($RULES)"
+  fail "A still has policy artifacts after peer loss"
 fi
 
 echo ""
-echo "--- Test 2: no nft table on A ---"
-if $COMPOSE exec -T node-a nft list table inet easytier_gw 2>&1 | grep -q "No such"; then
-  pass "nft table cleaned up"
+echo "--- Test 2: D -> A local still works after rollback ---"
+if assert_d_can_reach_a_local; then
+  pass "D can still reach A"
 else
-  fail "nft table still exists"
+  fail "D cannot reach A after rollback"
 fi
 
 echo ""
-echo "--- Test 3: A → C still reachable ---"
-if $COMPOSE exec -T node-a ping -c2 -W3 10.99.1.4 >/dev/null 2>&1; then
-  pass "A → C control plane OK after rollback"
+echo "--- Test 3: A -> C control plane still works after rollback ---"
+if assert_a_can_reach_c; then
+  pass "A can still reach C"
 else
-  fail "A → C broken after rollback"
+  fail "A cannot reach C after rollback"
 fi
 
-echo ""
-echo "--- Test 4: D → A still reachable ---"
-if $COMPOSE exec -T client-d ping -c2 -W3 10.99.1.10 >/dev/null 2>&1; then
-  pass "D → A local OK after rollback"
-else
-  fail "D → A broken after rollback"
-fi
+echo "=== Restoring B for subsequent tests ==="
+compose up -d node-b >/dev/null
+sleep 3
+cleanup_node_rules node-b || true
 
 echo ""
 echo "=== Results: $PASS passed, $FAIL failed ==="

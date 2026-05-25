@@ -1,12 +1,8 @@
 #!/bin/bash
-# Build easytier-core for aarch64 linux (OpenWrt device deployment)
-# Uses a pre-built builder image with all dependencies cached
-#
-# First run: ~5 min (build builder image + compile)
-# Subsequent: ~1-3 min (incremental cargo build)
+# Build arm64 binaries used by Docker integration tests.
+# Reuses the same cached builder image/volumes as build-openwrt.sh.
 set -eu
 
-# Ensure Docker credential helpers are in PATH (macOS Docker Desktop)
 if [ -d "/Applications/Docker.app/Contents/Resources/bin" ]; then
   export PATH="/Applications/Docker.app/Contents/Resources/bin:$PATH"
 fi
@@ -19,7 +15,6 @@ BUILDER_IMAGE="easytier-builder:arm64"
 
 mkdir -p "$DIST_DIR"
 
-# Build builder image if not exists
 if ! docker image inspect "$BUILDER_IMAGE" >/dev/null 2>&1; then
   echo "=== Building builder image (one-time) ==="
   docker build -t "$BUILDER_IMAGE" \
@@ -28,7 +23,7 @@ if ! docker image inspect "$BUILDER_IMAGE" >/dev/null 2>&1; then
     "$SCRIPT_DIR"
 fi
 
-echo "=== Building EasyTier for aarch64-unknown-linux-musl ==="
+echo "=== Building Docker integration binaries for arm64 ==="
 
 docker run --rm \
   -v "$VENDOR_DIR":/src \
@@ -36,30 +31,38 @@ docker run --rm \
   -v easytier-cargo-registry:/usr/local/cargo/registry \
   -v easytier-cargo-git:/usr/local/cargo/git \
   -v easytier-target-aarch64:/src/target \
+  -v easytier-pnpm-store:/root/.local/share/pnpm/store \
   -w /src \
   --platform linux/arm64 \
   "$BUILDER_IMAGE" \
   bash -c '
     set -eu
-
-    # The repo pins channel "1.95"; rustup may try to sync that channel online.
-    # Use the already-cached full toolchain in the builder image for repeatable builds.
     export RUSTUP_TOOLCHAIN=1.95.0
 
-    # Ensure musl target is installed for the active toolchain
-    # (rust-toolchain.toml may specify a different version than the image default)
     rustup target add aarch64-unknown-linux-musl
+
+    export CI=true
+    if [ -d easytier-web/frontend ]; then
+      echo "--- Building frontend ---"
+      cd easytier-web/frontend
+      pnpm install --frozen-lockfile 2>/dev/null || pnpm install
+      pnpm build
+      cd /src
+    fi
 
     echo "--- Building easytier-core ---"
     cargo build --release --target aarch64-unknown-linux-musl -p easytier --features gateway-policy
 
-    # Copy output
+    echo "--- Building easytier-web ---"
+    cargo build --release --target aarch64-unknown-linux-musl -p easytier-web
+
     cp target/aarch64-unknown-linux-musl/release/easytier-core /dist/ 2>/dev/null || \
     cp target/aarch64-unknown-linux-musl/release/easytier /dist/easytier-core
+    cp target/aarch64-unknown-linux-musl/release/easytier-web /dist/
 
     echo "--- Done ---"
     ls -lh /dist/
   '
 
-echo "=== Device binary ready in $DIST_DIR ==="
+echo "=== Docker test binaries ready in $DIST_DIR ==="
 ls -lh "$DIST_DIR"

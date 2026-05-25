@@ -1,18 +1,13 @@
 # EasyTier Gateway Integration Lab
 #
-# Simplified single-network topology for Docker Desktop compatibility.
-# All nodes on one underlay network. D's default gateway points to A.
-# Policy routing on A marks D's traffic and forwards to B.
+# Product-path topology:
+#   A/B: OpenWrt rootfs + easytier-core -w
+#   C:   easytier-web config-server/API
+#   D:   client behind A
+#   internet: service reachable only from B's WAN side
 #
-# Topology:
-#   D (10.99.1.100) --default gw--> A (10.99.1.10) --policy route--> B (10.99.1.3) --> Internet
-#                                          |                            |
-#                                          └── C (10.99.1.4, control) ──┘
-#
-# Usage:
-#   docker compose up -d
-#   make test
-#   docker compose down
+# Docker keeps A/B/C/D on one lab underlay for Desktop compatibility, but
+# the policy still flows through Web REST -> WebClient RPC -> gateway_policy.
 
 networks:
   labnet:
@@ -24,9 +19,8 @@ networks:
 services:
   # ── A: Source Gateway ──
   node-a:
-    build:
-      context: images
-      dockerfile: Dockerfile.ubuntu
+    image: ghcr.io/openwrt/rootfs:armsr-armv8
+    entrypoint: ["/entrypoint.sh"]
     hostname: node-a
     privileged: true
     cap_add:
@@ -39,16 +33,19 @@ services:
         ipv4_address: 10.99.1.10
     environment:
       - ROLE=source
+      - CONFIG_SERVER=udp://10.99.1.4:22020/admin
+      - MACHINE_ID=00000000-0000-0000-0000-00000000000a
+      - NODE_HOSTNAME=node-a
     volumes:
-      - ./configs/node-a:/etc/easytier:ro
+      - ./images/entrypoint-openwrt.sh:/entrypoint.sh:ro
+      - ../../dist/aarch64/easytier-core:/usr/bin/easytier-core:ro
     depends_on:
       - web
 
   # ── B: Exit Gateway ──
   node-b:
-    build:
-      context: images
-      dockerfile: Dockerfile.ubuntu
+    image: ghcr.io/openwrt/rootfs:armsr-armv8
+    entrypoint: ["/entrypoint.sh"]
     hostname: node-b
     privileged: true
     cap_add:
@@ -61,8 +58,13 @@ services:
         ipv4_address: 10.99.1.3
     environment:
       - ROLE=exit
+      - DEVICE_TEMPLATE=singleport
+      - CONFIG_SERVER=udp://10.99.1.4:22020/admin
+      - MACHINE_ID=00000000-0000-0000-0000-00000000000b
+      - NODE_HOSTNAME=node-b
     volumes:
-      - ./configs/node-b:/etc/easytier:ro
+      - ./images/entrypoint-openwrt.sh:/entrypoint.sh:ro
+      - ../../dist/aarch64/easytier-core:/usr/bin/easytier-core:ro
     depends_on:
       - web
 
@@ -77,8 +79,10 @@ services:
         ipv4_address: 10.99.1.4
     ports:
       - "11211:11211"
+    environment:
+      - ROLE=web
     volumes:
-      - ./configs/web:/etc/easytier:ro
+      - ../../dist/aarch64/easytier-web:/opt/easytier/easytier-web:ro
 
   # ── D: Client behind A ──
   client-d:
@@ -92,12 +96,26 @@ services:
     networks:
       labnet:
         ipv4_address: 10.99.1.100
-    entrypoint: ["/bin/sh", "-c"]
-    command:
-      - |
-        # D's default gateway points to A
-        ip route replace default via 10.99.1.10
-        echo "client-d ready, default gw -> 10.99.1.10 (node-a)"
-        sleep infinity
+    environment:
+      - ROLE=client
+      - CLIENT_DEFAULT_GW=10.99.1.10
+      - CLIENT_IPV4=10.99.1.100/25
     depends_on:
       - node-a
+
+  # ── Deterministic Internet endpoint. D uses /25, so .200 goes via A. ──
+  internet:
+    build:
+      context: images
+      dockerfile: Dockerfile.ubuntu
+    hostname: internet
+    command:
+      - sh
+      - -c
+      - |
+        while true; do
+          printf 'HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\nok\n' | nc -l -p 8080
+        done
+    networks:
+      labnet:
+        ipv4_address: 10.99.1.200

@@ -5,6 +5,9 @@ ROLE=${ROLE:-unknown}
 DEVICE_TEMPLATE=${DEVICE_TEMPLATE:-dualport}
 WAN_IFACE=${WAN_IFACE:-eth0}
 LAN_IFACE=${LAN_IFACE:-eth1}
+CONFIG_SERVER=${CONFIG_SERVER:-}
+MACHINE_ID=${MACHINE_ID:-}
+NODE_HOSTNAME=${NODE_HOSTNAME:-$(cat /proc/sys/kernel/hostname 2>/dev/null || echo openwrt-node)}
 
 echo "[$(hostname)] starting... template=$DEVICE_TEMPLATE role=$ROLE"
 
@@ -22,9 +25,16 @@ fi
 
 ip addr show 2>/dev/null || true
 
-# TODO: start easytier-core here once binaries are available
-# On real device, this is managed by procd init script:
-#   easytier-core -w udp://192.168.64.4:22020/admin
+if [ -n "$CONFIG_SERVER" ] && [ -x /usr/bin/easytier-core ]; then
+  echo "[$(hostname)] starting easytier-core webclient -> $CONFIG_SERVER"
+  /usr/bin/easytier-core \
+    -w "$CONFIG_SERVER" \
+    --machine-id "$MACHINE_ID" \
+    --hostname "$NODE_HOSTNAME" &
+  echo "$!" >/tmp/easytier-core.pid
+else
+  echo "[$(hostname)] easytier-core not started (CONFIG_SERVER or binary missing)"
+fi
 
 echo "[$(hostname)] ready"
 sleep infinity
