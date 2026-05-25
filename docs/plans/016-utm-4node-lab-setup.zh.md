@@ -142,6 +142,7 @@ sudo ip route replace default via 192.168.128.254
 ```sh
 make build-server
 make build-openwrt
+make build-docker-test
 ```
 
 产物：
@@ -150,7 +151,15 @@ make build-openwrt
 dist/x86_64/easytier-core
 dist/x86_64/easytier-web
 dist/aarch64/easytier-core
+dist/aarch64/easytier-web
 ```
+
+`make build-openwrt` 和 `make build-docker-test` 默认使用 `EASYTIER_BUILD_BACKEND=auto`：
+
+- 本机存在 `aarch64-linux-musl-gcc`、`aarch64-linux-musl-ar`、Rust target 时，优先走本机增量构建。
+- 本机工具链缺失或 native 构建失败时，自动回退到 Docker builder。
+- 可通过 `EASYTIER_BUILD_BACKEND=native` 强制本机构建。
+- 可通过 `EASYTIER_BUILD_BACKEND=docker` 强制 Docker 构建。
 
 OpenWrt 镜像构建可通过 `.env` 指定默认 C 端地址：
 

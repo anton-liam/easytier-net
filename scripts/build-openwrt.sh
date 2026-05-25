@@ -1,9 +1,10 @@
 #!/bin/bash
 # Build easytier-core for aarch64 linux (OpenWrt device deployment)
-# Uses a pre-built builder image with all dependencies cached
+# Prefers local aarch64 musl cross compile; falls back to Docker when needed.
 #
-# First run: ~5 min (build builder image + compile)
-# Subsequent: ~1-3 min (incremental cargo build)
+# EASYTIER_BUILD_BACKEND=auto   local first, Docker fallback (default)
+# EASYTIER_BUILD_BACKEND=native require local aarch64 musl toolchain
+# EASYTIER_BUILD_BACKEND=docker require Docker builder
 set -eu
 
 # Ensure Docker credential helpers are in PATH (macOS Docker Desktop)
@@ -16,30 +17,48 @@ PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 VENDOR_DIR="$PROJECT_DIR/vendor/EasyTier"
 DIST_DIR="$PROJECT_DIR/dist/aarch64"
 BUILDER_IMAGE="easytier-builder:arm64"
+BUILD_BACKEND="${EASYTIER_BUILD_BACKEND:-auto}"
+
+# shellcheck disable=SC1091
+. "$SCRIPT_DIR/lib-build.sh"
 
 mkdir -p "$DIST_DIR"
 
-# Build builder image if not exists
-if ! docker image inspect "$BUILDER_IMAGE" >/dev/null 2>&1; then
-  echo "=== Building builder image (one-time) ==="
-  docker build -t "$BUILDER_IMAGE" \
+build_native() {
+  echo "=== Building EasyTier aarch64 core with local musl toolchain ==="
+  setup_aarch64_musl_native_env
+
+  (
+    cd "$VENDOR_DIR"
+    rustup target add aarch64-unknown-linux-musl
+    cargo build --release --target aarch64-unknown-linux-musl -p easytier --features gateway-policy
+  )
+
+  copy_easytier_core_artifact "$VENDOR_DIR" "aarch64-unknown-linux-musl" "$DIST_DIR"
+  echo "=== Native device binary ready in $DIST_DIR ==="
+}
+
+build_docker() {
+  if ! docker image inspect "$BUILDER_IMAGE" >/dev/null 2>&1; then
+    echo "=== Building builder image (one-time) ==="
+    docker build -t "$BUILDER_IMAGE" \
+      --platform linux/arm64 \
+      -f "$SCRIPT_DIR/Dockerfile.builder" \
+      "$SCRIPT_DIR"
+  fi
+
+  echo "=== Building EasyTier aarch64 core with Docker builder ==="
+
+  docker run --rm \
+    -v "$VENDOR_DIR":/src \
+    -v "${DIST_DIR}":/dist \
+    -v easytier-cargo-registry:/usr/local/cargo/registry \
+    -v easytier-cargo-git:/usr/local/cargo/git \
+    -v easytier-target-aarch64:/src/target \
+    -w /src \
     --platform linux/arm64 \
-    -f "$SCRIPT_DIR/Dockerfile.builder" \
-    "$SCRIPT_DIR"
-fi
-
-echo "=== Building EasyTier for aarch64-unknown-linux-musl ==="
-
-docker run --rm \
-  -v "$VENDOR_DIR":/src \
-  -v "${DIST_DIR}":/dist \
-  -v easytier-cargo-registry:/usr/local/cargo/registry \
-  -v easytier-cargo-git:/usr/local/cargo/git \
-  -v easytier-target-aarch64:/src/target \
-  -w /src \
-  --platform linux/arm64 \
-  "$BUILDER_IMAGE" \
-  bash -c '
+    "$BUILDER_IMAGE" \
+    bash -c '
     set -eu
 
     # The repo pins channel "1.95"; rustup may try to sync that channel online.
@@ -60,6 +79,35 @@ docker run --rm \
     echo "--- Done ---"
     ls -lh /dist/
   '
+}
+
+case "$BUILD_BACKEND" in
+  auto)
+    if can_build_aarch64_musl_native; then
+      build_native || {
+        echo "WARNING: native build failed; falling back to Docker builder" >&2
+        build_docker
+      }
+    else
+      echo "=== Local aarch64 musl toolchain not found; using Docker builder ==="
+      build_docker
+    fi
+    ;;
+  native)
+    if ! can_build_aarch64_musl_native; then
+      echo "ERROR: native aarch64 musl toolchain not found. Install musl-cross or use EASYTIER_BUILD_BACKEND=docker." >&2
+      exit 1
+    fi
+    build_native
+    ;;
+  docker)
+    build_docker
+    ;;
+  *)
+    echo "ERROR: unknown EASYTIER_BUILD_BACKEND='$BUILD_BACKEND'. Use: auto | native | docker" >&2
+    exit 1
+    ;;
+esac
 
 echo "=== Device binary ready in $DIST_DIR ==="
 ls -lh "$DIST_DIR"

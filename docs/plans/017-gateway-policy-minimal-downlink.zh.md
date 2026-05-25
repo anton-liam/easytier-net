@@ -102,9 +102,21 @@
 - [ ] `cargo test -p easytier gateway_policy --features gateway-policy --no-default-features`
 - [ ] `cargo check -p easytier --features gateway-policy`
 - [ ] `cargo check -p easytier-web`
-- [ ] `bash -n scripts/build-image.sh scripts/build-openwrt.sh scripts/build-server.sh`
+- [ ] `bash -n scripts/lib-build.sh scripts/build-image.sh scripts/build-openwrt.sh scripts/build-docker-test.sh scripts/build-server.sh`
+- [ ] `EASYTIER_BUILD_BACKEND=native ./scripts/build-openwrt.sh`
+- [ ] `EASYTIER_BUILD_BACKEND=native ./scripts/build-docker-test.sh`
 - [ ] Docker 集成测试覆盖策略下发到执行路径。
 - [ ] UTM 4 节点最终验收：D 通过 A 入口，出口公网表现为 B。
+
+## 构建后端约定
+
+`build-openwrt.sh` 和 `build-docker-test.sh` 支持 `EASYTIER_BUILD_BACKEND`：
+
+- `auto`：默认值。优先本机 aarch64 musl 增量构建，失败后回退 Docker。
+- `native`：强制本机 aarch64 musl 构建，用于开发机快速迭代。
+- `docker`：强制 Docker builder 构建，用于缺少本机交叉工具链的环境。
+
+本机 native 构建使用 EasyTier 仓库内的 `rust-toolchain.toml`，不要在项目根目录强制设置 `RUSTUP_TOOLCHAIN=1.95.0`，避免触发额外 toolchain 下载。
 
 ## OpenWrt 镜像默认直连
 
