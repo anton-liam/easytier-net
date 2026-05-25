@@ -20,9 +20,9 @@ echo "=== Setup: apply policy ==="
 $COMPOSE exec -T node-a sh -c '
   nft add table inet easytier_gw
   nft add chain inet easytier_gw prerouting "{ type filter hook prerouting priority -150; }"
-  nft add rule inet easytier_gw prerouting iif eth1 ip saddr 192.168.1.0/24 meta mark set 0x7e
+  nft add rule inet easytier_gw prerouting ip saddr 10.99.1.100 ip daddr != 10.99.1.0/24 meta mark set 0x7e
   ip rule add fwmark 0x7e table 126 2>/dev/null || true
-  ip route replace default via 192.168.64.3 dev eth0 table 126
+  ip route replace default via 10.99.1.3 dev eth0 table 126
 '
 
 echo ""
@@ -58,7 +58,7 @@ fi
 
 echo ""
 echo "--- Test 3: A → C still reachable ---"
-if $COMPOSE exec -T node-a ping -c2 -W3 192.168.64.4 >/dev/null 2>&1; then
+if $COMPOSE exec -T node-a ping -c2 -W3 10.99.1.4 >/dev/null 2>&1; then
   pass "A → C control plane OK after rollback"
 else
   fail "A → C broken after rollback"
@@ -66,7 +66,7 @@ fi
 
 echo ""
 echo "--- Test 4: D → A still reachable ---"
-if $COMPOSE exec -T client-d ping -c2 -W3 192.168.1.1 >/dev/null 2>&1; then
+if $COMPOSE exec -T client-d ping -c2 -W3 10.99.1.10 >/dev/null 2>&1; then
   pass "D → A local OK after rollback"
 else
   fail "D → A broken after rollback"

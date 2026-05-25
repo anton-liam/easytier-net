@@ -1,5 +1,12 @@
 # EasyTier-Net Gateway
 
+## 沟通与文档规范
+
+- **沟通语言**：使用中文
+- **文档语言**：所有 spec（`docs/specs/`）和 plan（`docs/plans/`）文档使用中文撰写
+- **文件命名**：spec 和 plan 文件以 `.zh.md` 结尾
+- **代码注释**：实现代码中需要补充方法级别的注释，描述功能用途
+
 ## 项目目标
 
 在 EasyTier 组网基础上，实现 D → A → B → Internet 的出口网关策略编排。
@@ -165,7 +172,7 @@ C 下发到 A/B 的策略是一个简单结构：
 # 1. mark
 nft add table inet easytier_gw
 nft add chain inet easytier_gw prerouting { type filter hook prerouting priority -150 \; }
-nft add rule inet easytier_gw prerouting iif "br-lan" ip saddr 192.168.1.0/24 meta mark set 0x7e
+nft add rule inet easytier_gw prerouting iif "br-lan" ip saddr 192.168.1.0/24 ip daddr != 192.168.1.0/24 meta mark set 0x7e
 
 # 2. policy route
 ip rule add fwmark 0x7e table 126

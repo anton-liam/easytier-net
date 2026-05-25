@@ -20,7 +20,7 @@ elif [ "$DEVICE_TEMPLATE" = "singleport" ]; then
   echo "  WAN: $WAN_IFACE (upstream, single-port exit)"
 fi
 
-ip -br addr show
+ip addr show 2>/dev/null || true
 
 # TODO: start easytier-core here once binaries are available
 # On real device, this is managed by procd init script:

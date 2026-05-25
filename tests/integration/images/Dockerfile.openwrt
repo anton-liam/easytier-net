@@ -1,25 +1,9 @@
-# A/B nodes: OpenWrt rootfs with UCI, procd, fw4, nftables
-# arm64 native on Apple Silicon Mac
+# A/B nodes: OpenWrt rootfs with nft, ip, ping pre-installed
+# OpenWrt manifest uses non-standard arch "aarch64_generic", must pin by digest
+FROM ghcr.io/openwrt/rootfs@sha256:ca327ed17491406b438bbad2cf4f9202f89bd768371c43aacd4b165775e76314
 
-FROM ghcr.io/openwrt/rootfs:armsr-armv8
-
-# Install required packages for gateway functionality
-RUN mkdir -p /var/lock && \
-    opkg update && \
-    opkg install \
-      nftables \
-      ip-full \
-      kmod-nft-nat \
-      kmod-tun \
-      curl \
-      ca-bundle \
-      bash \
-      procps-ng-ps \
-      tcpdump && \
-    rm -f /tmp/opkg-lists/*
-
-# EasyTier binaries will be downloaded or mounted at runtime
-# Config mounted at /etc/easytier/
+# Core tools (nft, ip, ping, sh) are already in the base image.
+# No opkg in this minimal rootfs — skip package install.
 
 COPY entrypoint-openwrt.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
