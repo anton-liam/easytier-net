@@ -19,7 +19,7 @@ D(client) -> A(source/OpenWrt) -> EasyTier tunnel -> B(exit/OpenWrt) -> Internet
 
 必须验证：
 - A/B 能通过 `easytier-core -w udp://C:22020/admin` 注册到 C
-- C 能通过 pair API 下发 `peer_urls=[udp://C:11010]` 的基础组网配置
+- C 能通过 pair API 下发 `peer_urls=[udp://C:11010]` 的基础组网配置；`peer_urls` 只允许 `tcp://` 或 `udp://`
 - C 的 Web Device List 能看到 A/B 在线
 - C 能通过 pair API 一次指定 Source/Exit 并下发策略
 - D 的公网出口表现为 B
@@ -215,7 +215,7 @@ dist/aarch64/easytier-core -> /usr/bin/easytier-core
 - B 在线
 - A/B 有各自 machine id
 - pair API 下发后，A/B 已进入同一 EasyTier network instance
-- A/B 的 `peer_urls` 指向 C relay
+- A/B 的 `peer_urls` 指向 C relay，且 scheme 只允许 `tcp` / `udp`
 - A tunnel IP 和 B tunnel IP 可确认
 
 ## 策略下发

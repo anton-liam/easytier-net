@@ -146,7 +146,7 @@ git submodule update --init --recursive
 ## 验收标准
 
 - A/B 节点能在 Device List 中保持原生 EasyTier 在线管理能力。
-- A/B 的基础组网 `peer_urls` 由 C 下发并指向 C relay，不要求设备镜像写死对端 B。
+- A/B 的基础组网 `peer_urls` 由 C 下发并指向 C relay，不要求设备镜像写死对端 B；产品编排只允许 `tcp://` / `udp://`。
 - Web 控制台能对在线节点下发 Source/Exit 策略。
 - D 到 A 本机的访问不被策略捕获。
 - A/B/C 控制面互联不被策略捕获。

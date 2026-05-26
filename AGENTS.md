@@ -11,7 +11,7 @@
 
 在 EasyTier 组网基础上，实现 D → A → B → Internet 的出口网关策略编排。
 C 作为控制面和搭线 relay，通过 EasyTier 已有 WebClient/config-server 通道编排 A/B。A/B 默认只用 `-w` 注册到 C，Web pair API 先下发基础组网配置，再下发出口策略：
-- `peer_urls`：A/B 的 EasyTier 组网入口，默认指向 C 的 relay listener
+- `peer_urls`：A/B 的 EasyTier 组网入口，默认指向 C 的 relay listener；产品下发只允许 `tcp://` 和 `udp://`
 - `proxy_cidrs`：A 声明 D 子网，供 B 获得回程路径
 - `exit_nodes`：A 指定 B 的 tunnel IP 作为 EasyTier 出口 peer
 - `gateway_policy Source`：A 只选择 D 子网出口流量进入 EasyTier，并在异常时 fail-closed
@@ -190,7 +190,7 @@ Web pair API 在策略前先下发 EasyTier network config：
 }
 ```
 
-`peer_urls` 等价于 CLI `-p/--peers`，但由 Web 控制台通过 WebClient 下发。C 可以不注册到 Device List；C 作为本地 relay/control 基础设施存在，Device List 默认只管理 A/B 等客户端设备。
+`peer_urls` 等价于 CLI `-p/--peers`，但由 Web 控制台通过 WebClient 下发。产品编排只允许 `tcp://` 和 `udp://` peer URL，避免把非预期连接器写入 A/B 配置。C 可以不注册到 Device List；C 作为本地 relay/control 基础设施存在，Device List 默认只管理 A/B 等客户端设备。
 
 ### 策略模型
 

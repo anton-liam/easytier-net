@@ -15,7 +15,7 @@
 当前 `gateway_policy` 雏形已具备：
 
 - `GatewayPolicyRpc` 能随 `easytier-core -w` 的 WebClient session 注册。
-- Web pair API 能在策略前下发 A/B 的基础 EasyTier network config，`peer_urls` 指向 C relay。
+- Web pair API 能在策略前下发 A/B 的基础 EasyTier network config，`peer_urls` 指向 C relay，且只允许 `tcp://` / `udp://`。
 - Web 侧 pair API 能按 Source/Exit 下发策略。
 - A 端能按 `managed_cidrs + ingress_iface` 做 nft mark 和 policy route。
 - B 端能启用 IPv4 forwarding，对受管 CIDR 从 WAN 出口做 masquerade。
