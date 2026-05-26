@@ -65,7 +65,7 @@ docker run --rm \
 
     # Build easytier-web
     echo "--- Building easytier-web ---"
-    cargo build --release --target x86_64-unknown-linux-musl -p easytier-web
+    cargo build --release --target x86_64-unknown-linux-musl -p easytier-web --features embed
 
     # Copy outputs
     cp target/x86_64-unknown-linux-musl/release/easytier-core /dist/ 2>/dev/null || \

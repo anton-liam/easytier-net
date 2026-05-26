@@ -38,7 +38,7 @@ build_native() {
     cd "$VENDOR_DIR"
     rustup target add aarch64-unknown-linux-musl
     cargo build --release --target aarch64-unknown-linux-musl -p easytier --features gateway-policy
-    cargo build --release --target aarch64-unknown-linux-musl -p easytier-web
+    cargo build --release --target aarch64-unknown-linux-musl -p easytier-web --features embed
   )
 
   copy_easytier_core_artifact "$VENDOR_DIR" "aarch64-unknown-linux-musl" "$DIST_DIR"
@@ -86,7 +86,7 @@ build_docker() {
     cargo build --release --target aarch64-unknown-linux-musl -p easytier --features gateway-policy
 
     echo "--- Building easytier-web ---"
-    cargo build --release --target aarch64-unknown-linux-musl -p easytier-web
+    cargo build --release --target aarch64-unknown-linux-musl -p easytier-web --features embed
 
     cp target/aarch64-unknown-linux-musl/release/easytier-core /dist/ 2>/dev/null || \
     cp target/aarch64-unknown-linux-musl/release/easytier /dist/easytier-core
