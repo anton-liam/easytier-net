@@ -392,6 +392,8 @@ payload 与 pair 下发一致，至少需要：
 }
 ```
 
+pair remove 会先校验 payload；CIDR/IP/网口字段不合法时必须直接返回 400，不向 A/B 下发任何清理 RPC，避免半清理状态。删除出口策略只清理 gateway policy 规则和 A 的 `proxy_cidrs` / `exit_nodes`，基础 EasyTier network instance 保留为设备管理配置。
+
 删除后验证：
 
 ```sh

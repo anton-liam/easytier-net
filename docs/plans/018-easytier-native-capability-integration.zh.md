@@ -122,18 +122,18 @@ Internet reply
   }
   ```
 
-- [ ] **Step 2: pair apply 失败时按已执行步骤反向回滚**
+- [x] **Step 2: pair apply 失败时按已执行步骤反向回滚**
 
   失败回滚顺序：
 
-  1. 如果 A Source 已应用，调用 A `RemovePolicy`。
-  2. 如果 B Exit 已应用，调用 B `RemovePolicy`。
-  3. 如果 A `exit_nodes` 已添加，调用 `ConfigRpc/PatchConfig` remove。
-  4. 如果 A `proxy_networks` 已添加，调用 `ConfigRpc/PatchConfig` remove。
+  1. 基础 EasyTier network instance 保留为设备管理配置，不随出口策略回滚。
+  2. 如果 A Source 下发失败，调用 B `RemovePolicy`。
+  3. 如果 B Exit 下发失败或 A Source 下发失败，调用 A `ConfigRpc/PatchConfig` remove `exit_nodes`。
+  4. 如果 B Exit 下发失败或 A Source 下发失败，调用 A `ConfigRpc/PatchConfig` remove `proxy_networks`。
 
-- [ ] **Step 3: pair remove 同时清理 gateway policy 和 EasyTier 原生配置**
+- [x] **Step 3: pair remove 同时清理 gateway policy 和 EasyTier 原生配置**
 
-  remove 顺序：
+  remove 先校验 payload，CIDR/IP/网口字段不合法时直接返回 400，不向 A/B 下发清理 RPC。校验通过后的 remove 顺序：
 
   1. A `RemovePolicy`
   2. B `RemovePolicy`

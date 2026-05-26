@@ -220,7 +220,7 @@ pair apply 的顺序必须是：
 3. 对 B 下发 `GatewayRole::Exit`
 4. 对 A 下发 `GatewayRole::Source`
 
-失败时按已执行步骤反向回滚，避免只完成半边策略。
+失败时按已执行步骤反向回滚 gateway policy 和 Source 原生 `proxy_cidrs` / `exit_nodes` 补丁，避免只完成半边策略。基础 EasyTier network instance 属于设备管理配置，apply 失败和 pair remove 时默认保留，不随出口策略删除。
 
 ### A 收到策略后执行
 
