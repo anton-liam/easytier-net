@@ -4,7 +4,7 @@
 
 **目标：** 在当前 `gateway_policy` 初步雏形上，借用 EasyTier 已有的子网代理、出口节点、系统转发和配置下发能力，补齐 D -> A -> B -> Internet 的回程、稳定性和防泄漏验证。
 
-**Architecture:** Web 控制台继续通过 EasyTier WebClient/config-server 通道管理 A/B，不新增独立 agent。A/B 的基础组网能力尽量使用 EasyTier 既有 `ConfigRpc` 和网络配置字段；`gateway_policy` 只保留最小职责：A 选择 D 子网出口流量进入 EasyTier，B 对来自 EasyTier 的受管流量做转发和 NAT。回程由 EasyTier `proxy_cidrs` 路由传播能力承接，出口 peer 选择由 EasyTier `exit_nodes` 承接。
+**Architecture:** Web 控制台继续通过 EasyTier WebClient/config-server 通道管理 A/B，不新增独立 agent。A/B 默认只以 `easytier-core -w` 注册到 C；Web pair API 先通过 `RunNetworkInstance` 下发基础组网配置（`peer_urls=[C relay]`），再下发出口策略。`gateway_policy` 只保留最小职责：A 选择 D 子网出口流量进入 EasyTier，B 对来自 EasyTier 的受管流量做转发和 NAT。回程由 EasyTier `proxy_cidrs` 路由传播能力承接，出口 peer 选择由 EasyTier `exit_nodes` 承接。
 
 **Tech Stack:** Rust, protobuf/prost, EasyTier ConfigRpc/WebClient, nftables, iproute2, OpenWrt, Docker Compose, UTM。
 
@@ -15,6 +15,7 @@
 当前 `gateway_policy` 雏形已具备：
 
 - `GatewayPolicyRpc` 能随 `easytier-core -w` 的 WebClient session 注册。
+- Web pair API 能在策略前下发 A/B 的基础 EasyTier network config，`peer_urls` 指向 C relay。
 - Web 侧 pair API 能按 Source/Exit 下发策略。
 - A 端能按 `managed_cidrs + ingress_iface` 做 nft mark 和 policy route。
 - B 端能启用 IPv4 forwarding，对受管 CIDR 从 WAN 出口做 masquerade。
@@ -63,7 +64,7 @@ Internet reply
   -> D
 ```
 
-## Task 1: 策略编排接入 EasyTier ConfigRpc
+## Task 1: 策略编排接入 EasyTier 原生组网和 ConfigRpc
 
 **Files:**
 
@@ -71,14 +72,34 @@ Internet reply
 - Modify: `vendor/EasyTier/easytier/src/proto/gateway_policy.proto`
 - Test: `vendor/EasyTier/easytier-web/src/restful/gateway_policy.rs`
 
-- [ ] **Step 1: 在 pair API 中下发 EasyTier 原生配置补丁**
+- [x] **Step 0: 在 pair API 中下发基础组网配置**
+
+  pair payload 可以携带：
+
+  ```json
+  {
+    "network_name": "utm-gw",
+    "network_secret": "utm-gw-secret",
+    "source_peer_tun_ip": "10.126.126.2",
+    "exit_peer_tun_ip": "10.126.126.3",
+    "network_length": 24,
+    "peer_urls": ["udp://C:11010"],
+    "disable_p2p": true,
+    "save_network": true
+  }
+  ```
+
+  Web 先对 A/B 调用 WebClient `RunNetworkInstance`，使用稳定 pair instance id 和 `overwrite=true`，避免重复下发时不断创建新 `tun0` 实例。
+
+- [x] **Step 1: 在 pair API 中下发 EasyTier 原生配置补丁**
 
   pair apply 时按顺序执行：
 
-  1. 对 A 调用 `api.config.ConfigRpcService/PatchConfig`，`proxy_networks ADD managed_cidrs`。
-  2. 对 A 调用 `api.config.ConfigRpcService/PatchConfig`，`exit_nodes ADD exit_peer_tun_ip`。
-  3. 对 B 下发 `GatewayRole::Exit` 策略。
-  4. 对 A 下发 `GatewayRole::Source` 策略。
+  1. 对 A/B 调用 WebClient `RunNetworkInstance`，`peer_urls=[C]`。
+  2. 对 A 调用 `api.config.ConfigRpcService/PatchConfig`，`proxy_networks ADD managed_cidrs`。
+  3. 对 A 调用 `api.config.ConfigRpcService/PatchConfig`，`exit_nodes ADD exit_peer_tun_ip`。
+  4. 对 B 下发 `GatewayRole::Exit` 策略。
+  5. 对 A 下发 `GatewayRole::Source` 策略。
 
   预期 payload 语义：
 
@@ -444,6 +465,15 @@ Internet reply
 
 - [ ] **Step 6: 验证 UDP/WebSocket/MTU**
 
+  默认强验收：
+
+  ```sh
+  curl -4 --max-time 10 -fsS "$UTM_TEST_TCP_URL"
+  ping -M do -s 1200 -c 3 "$UTM_TEST_MTU_HOST"
+  ```
+
+  默认弱验收，可通过 `UTM_REQUIRE_TRACEPATH=1`、`UTM_REQUIRE_LARGE_MTU=1`、`UTM_REQUIRE_WEBSOCKET=1`、`UTM_REQUIRE_PUBLIC_UDP=1` 升格为强验收。
+
   UDP：
 
   ```sh
@@ -466,9 +496,9 @@ Internet reply
 
   预期：
 
-  - UDP 不出现持续单向丢包。
-  - WebSocket 长连接能建立并持续收发。
-  - MTU 异常时能确定建议值，优先记录 1280/1360/1380 三档结果。
+  - 强验收失败直接失败。
+  - 弱验收失败输出 `WEAK-FAIL/SKIP`，不再静默通过。
+  - MTU 异常时能确定建议值，优先记录 1200/1360 两档结果。
 
 ## Task 7: 文档和验收口径更新
 

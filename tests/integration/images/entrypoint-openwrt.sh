@@ -15,6 +15,7 @@ NODE_PEERS=${NODE_PEERS:-}
 NODE_LISTENERS=${NODE_LISTENERS:-}
 NODE_DEV_NAME=${NODE_DEV_NAME:-tun0}
 DEFAULT_GW=${DEFAULT_GW:-}
+BOOTSTRAP_NETWORK=${BOOTSTRAP_NETWORK:-0}
 
 echo "[$(hostname)] starting... template=$DEVICE_TEMPLATE role=$ROLE"
 
@@ -43,19 +44,23 @@ if [ -n "$CONFIG_SERVER" ] && [ -x /usr/bin/easytier-core ]; then
     -w "$CONFIG_SERVER" \
     --proxy-forward-by-system \
     --machine-id "$MACHINE_ID" \
-    --hostname "$NODE_HOSTNAME" \
-    --network-name "$NODE_NETWORK_NAME" \
-    --network-secret "$NODE_NETWORK_SECRET" \
-    --dev-name "$NODE_DEV_NAME"
+    --hostname "$NODE_HOSTNAME"
 
-  if [ -n "$NODE_IPV4" ]; then
-    set -- "$@" --ipv4 "$NODE_IPV4"
-  fi
-  if [ -n "$NODE_PEERS" ]; then
-    set -- "$@" --peers "$NODE_PEERS"
-  fi
-  if [ -n "$NODE_LISTENERS" ]; then
-    set -- "$@" --listeners "$NODE_LISTENERS"
+  if [ "$BOOTSTRAP_NETWORK" = "1" ]; then
+    set -- "$@" \
+      --network-name "$NODE_NETWORK_NAME" \
+      --network-secret "$NODE_NETWORK_SECRET" \
+      --dev-name "$NODE_DEV_NAME"
+
+    if [ -n "$NODE_IPV4" ]; then
+      set -- "$@" --ipv4 "$NODE_IPV4"
+    fi
+    if [ -n "$NODE_PEERS" ]; then
+      set -- "$@" --peers "$NODE_PEERS"
+    fi
+    if [ -n "$NODE_LISTENERS" ]; then
+      set -- "$@" --listeners "$NODE_LISTENERS"
+    fi
   fi
 
   "$@" &

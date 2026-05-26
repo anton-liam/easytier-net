@@ -20,8 +20,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       netcat-openbsd \
     && rm -rf /var/lib/apt/lists/*
 
-# TODO: C will run easytier-web + easytier-core (config-server mode)
-# Binaries downloaded or mounted at runtime
+# C runs easytier-web plus a local easytier-core relay. Binaries are mounted at runtime.
 
 COPY entrypoint-ubuntu.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh

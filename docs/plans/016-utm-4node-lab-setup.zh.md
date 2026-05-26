@@ -18,7 +18,8 @@ D(client) -> A(source/OpenWrt) -> EasyTier tunnel -> B(exit/OpenWrt) -> Internet
 ## 验收边界
 
 必须验证：
-- A/B 能通过 `easytier-core -w udp://C:22020/admin` 连接 C
+- A/B 能通过 `easytier-core -w udp://C:22020/admin` 注册到 C
+- C 能通过 pair API 下发 `peer_urls=[udp://C:11010]` 的基础组网配置
 - C 的 Web Device List 能看到 A/B 在线
 - C 能通过 pair API 一次指定 Source/Exit 并下发策略
 - D 的公网出口表现为 B
@@ -45,7 +46,7 @@ UTM 当前用两个网络模拟“客户端 LAN”和“外部/骨干网络”�
 |------|------|------|
 | Shared 网络 | `192.168.64.0/24` | A WAN、B WAN、C 控制面所在网络 |
 | Host 网络 | `192.168.128.0/24` | A LAN 和 D 客户端网络 |
-| EasyTier tunnel | `10.126.126.0/24` | A/B/C 组网后的虚拟网络 |
+| EasyTier tunnel | `10.126.126.0/24` | A/B 组网后的虚拟网络，C 可作为 no-tun relay |
 
 ```text
             Shared / underlay: 192.168.64.0/24
@@ -188,6 +189,7 @@ dist/x86_64/easytier-web
 
 C 需要提供：
 - EasyTier config-server：`udp://192.168.64.4:22020/admin`
+- EasyTier relay listener：`udp://192.168.64.4:11010`
 - Web 控制台：`http://192.168.64.4:11211`
 
 ### 2. 部署 A/B
@@ -212,12 +214,13 @@ dist/aarch64/easytier-core -> /usr/bin/easytier-core
 - A 在线
 - B 在线
 - A/B 有各自 machine id
-- A/B 已进入同一 EasyTier network instance
+- pair API 下发后，A/B 已进入同一 EasyTier network instance
+- A/B 的 `peer_urls` 指向 C relay
 - A tunnel IP 和 B tunnel IP 可确认
 
 ## 策略下发
 
-通过 pair API 一次编排 A/B：
+通过 pair API 一次编排 A/B。pair API 先下发基础组网配置，再下发出口策略：
 
 ```http
 POST /api/v1/gateway-policy/pair
@@ -233,17 +236,25 @@ POST /api/v1/gateway-policy/pair
   "managed_cidrs": ["192.168.128.0/24"],
   "ingress_iface": "br-lan",
   "easytier_iface": "tun0",
+  "source_peer_tun_ip": "<A_TUN_IP>",
   "exit_peer_tun_ip": "<B_TUN_IP>",
-  "exit_wan_iface": "eth0"
+  "exit_wan_iface": "eth0",
+  "network_name": "utm-gw",
+  "network_secret": "utm-gw-secret",
+  "network_length": 24,
+  "peer_urls": ["udp://192.168.64.4:11010"],
+  "disable_p2p": true,
+  "save_network": true
 }
 ```
 
 下发顺序要求：
-1. C 先通过 `ConfigRpc/PatchConfig` 给 A 添加 `proxy_cidrs = managed_cidrs`
-2. C 再通过 `ConfigRpc/PatchConfig` 给 A 添加 `exit_nodes = exit_peer_tun_ip`
-3. C 下发 Exit 策略到 B
-4. C 下发 Source 策略到 A
-5. 任一步失败，C 必须按已完成步骤反向回滚
+1. C 先通过 WebClient `RunNetworkInstance` 给 A/B 下发 `peer_urls=[C]` 的基础组网配置。
+2. C 再通过 `ConfigRpc/PatchConfig` 给 A 添加 `proxy_cidrs = managed_cidrs`。
+3. C 再通过 `ConfigRpc/PatchConfig` 给 A 添加 `exit_nodes = exit_peer_tun_ip`。
+4. C 下发 Exit 策略到 B。
+5. C 下发 Source 策略到 A。
+6. 任一步失败，C 必须按已完成步骤反向回滚；基础组网配置作为设备管理配置保留，不随出口策略删除。
 
 ## 验收命令
 
@@ -431,6 +442,17 @@ B WAN reply -> B tun0 -> A tun0 -> A br-lan -> D
 
 ## UDP/WebSocket/MTU 验收
 
+默认验收分为强验收和弱验收，避免可选工具缺失或公网测试点不稳定时被 `|| true` 静默吞掉。
+
+强验收：
+
+```sh
+curl -4 --max-time 10 -fsS "$UTM_TEST_TCP_URL"
+ping -M do -s 1200 -c 3 "$UTM_TEST_MTU_HOST"
+```
+
+弱验收默认只记录结果，不作为失败条件；需要升格时设置 `UTM_REQUIRE_TRACEPATH=1`、`UTM_REQUIRE_LARGE_MTU=1`、`UTM_REQUIRE_WEBSOCKET=1` 或 `UTM_REQUIRE_PUBLIC_UDP=1`。
+
 UDP：
 
 ```sh
@@ -452,9 +474,9 @@ ping -M do -s 1360 -c 3 1.1.1.1
 ```
 
 预期：
-- UDP 不出现持续单向丢包
-- WebSocket 长连接能建立并持续收发
-- MTU 至少记录 1200/1360 两档结果，异常时回收为后续 `mtu` 参数建议
+- 强验收失败直接失败
+- 弱验收输出 `WEAK-FAIL/SKIP`，作为诊断证据记录
+- MTU 至少强制验证 1200，1360 作为大包弱验收，异常时回收为后续 `mtu` 参数建议
 
 ## 异常 fail-closed 验收
 

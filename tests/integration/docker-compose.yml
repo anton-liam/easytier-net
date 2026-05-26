@@ -1,8 +1,8 @@
 # EasyTier Gateway Integration Lab
 #
 # Product-path topology:
-#   A/B: OpenWrt rootfs + easytier-core -w
-#   C:   easytier-web config-server/API
+#   A/B: OpenWrt rootfs + easytier-core -w only; Web later sends peer_urls=[C]
+#   C:   easytier-web config-server/API + local EasyTier relay listener
 #   D:   client behind A
 #   internet: service reachable only from B's WAN side
 #
@@ -51,8 +51,7 @@ services:
       - CONFIG_SERVER=udp://10.99.1.4:22020/admin
       - MACHINE_ID=00000000-0000-0000-0000-00000000000a
       - NODE_HOSTNAME=node-a
-      - NODE_IPV4=10.126.126.2
-      - NODE_PEERS=tcp://10.99.1.3:11010
+      - BOOTSTRAP_NETWORK=0
     volumes:
       - ./images/entrypoint-openwrt.sh:/entrypoint.sh:ro
       - ../../dist/aarch64/easytier-core:/usr/bin/easytier-core:ro
@@ -81,8 +80,7 @@ services:
       - CONFIG_SERVER=udp://10.99.1.4:22020/admin
       - MACHINE_ID=00000000-0000-0000-0000-00000000000b
       - NODE_HOSTNAME=node-b
-      - NODE_IPV4=10.126.126.3
-      - NODE_LISTENERS=tcp://0.0.0.0:11010
+      - BOOTSTRAP_NETWORK=0
     volumes:
       - ./images/entrypoint-openwrt.sh:/entrypoint.sh:ro
       - ../../dist/aarch64/easytier-core:/usr/bin/easytier-core:ro
@@ -102,8 +100,14 @@ services:
       - "11211:11211"
     environment:
       - ROLE=web
+      - RELAY_MACHINE_ID=00000000-0000-0000-0000-00000000000c
+      - RELAY_HOSTNAME=node-c
+      - RELAY_NETWORK_NAME=gateway-docker
+      - RELAY_NETWORK_SECRET=gateway-docker-secret
+      - RELAY_LISTENER=tcp://0.0.0.0:11010
     volumes:
       - ../../dist/aarch64/easytier-web:/opt/easytier/easytier-web:ro
+      - ../../dist/aarch64/easytier-core:/opt/easytier/easytier-core:ro
 
   # ── D: Client behind A ──
   client-d:

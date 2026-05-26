@@ -23,6 +23,20 @@ UTM_B_WAN_IFACE="${UTM_B_WAN_IFACE:-eth0}"
 UTM_EASYTIER_IFACE="${UTM_EASYTIER_IFACE:-tun0}"
 UTM_TEST_TCP_URL="${UTM_TEST_TCP_URL:-http://ifconfig.me/ip}"
 UTM_TEST_MTU_HOST="${UTM_TEST_MTU_HOST:-1.1.1.1}"
+UTM_REQUIRED_MTU_PROBE_SIZE="${UTM_REQUIRED_MTU_PROBE_SIZE:-1200}"
+UTM_LARGE_MTU_PROBE_SIZE="${UTM_LARGE_MTU_PROBE_SIZE:-1360}"
+UTM_TEST_WEBSOCKET_URL="${UTM_TEST_WEBSOCKET_URL:-wss://echo.websocket.events}"
+UTM_TEST_PUBLIC_UDP_IPERF_HOST="${UTM_TEST_PUBLIC_UDP_IPERF_HOST:-iperf3.iperf.fr}"
+UTM_REQUIRE_TRACEPATH="${UTM_REQUIRE_TRACEPATH:-0}"
+UTM_REQUIRE_LARGE_MTU="${UTM_REQUIRE_LARGE_MTU:-0}"
+UTM_REQUIRE_WEBSOCKET="${UTM_REQUIRE_WEBSOCKET:-0}"
+UTM_REQUIRE_PUBLIC_UDP="${UTM_REQUIRE_PUBLIC_UDP:-0}"
+UTM_GATEWAY_PEER_URLS="${UTM_GATEWAY_PEER_URLS:-udp://$UTM_C_HOST:11010}"
+UTM_C_RELAY_HOSTNAME="${UTM_C_RELAY_HOSTNAME:-utm-c}"
+UTM_NETWORK_NAME="${UTM_NETWORK_NAME:-utm-gw}"
+UTM_NETWORK_SECRET="${UTM_NETWORK_SECRET:-utm-gw-secret}"
+UTM_NETWORK_LENGTH="${UTM_NETWORK_LENGTH:-24}"
+UTM_DISABLE_P2P="${UTM_DISABLE_P2P:-true}"
 UTM_SSH_COMMON_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=6"
 
 run_ssh() {
@@ -71,7 +85,14 @@ policy_payload() {
   "ingress_iface": "$UTM_A_INGRESS_IFACE",
   "easytier_iface": "$UTM_EASYTIER_IFACE",
   "exit_peer_tun_ip": "$UTM_B_EASYTIER_IPV4",
-  "exit_wan_iface": "$UTM_B_WAN_IFACE"
+  "exit_wan_iface": "$UTM_B_WAN_IFACE",
+  "network_name": "$UTM_NETWORK_NAME",
+  "network_secret": "$UTM_NETWORK_SECRET",
+  "source_peer_tun_ip": "$UTM_A_EASYTIER_IPV4",
+  "network_length": $UTM_NETWORK_LENGTH,
+  "peer_urls": ["$UTM_GATEWAY_PEER_URLS"],
+  "disable_p2p": $UTM_DISABLE_P2P,
+  "save_network": true
 }
 JSON
 }
@@ -112,6 +133,10 @@ get_source_config() {
   proxy_rpc "$UTM_A_MACHINE_ID" "api.config.ConfigRpcService" "GetConfig" "{}"
 }
 
+get_exit_config() {
+  proxy_rpc "$UTM_B_MACHINE_ID" "api.config.ConfigRpcService" "GetConfig" "{}"
+}
+
 get_source_status() {
   curl -fsS \
     -b "$UTM_WEB_COOKIE_FILE" \
@@ -125,6 +150,72 @@ assert_json_contains_native_source_config() {
     and
     (((.config.exit_nodes // []) | index($exit)) != null)
   ' >/dev/null
+}
+
+assert_json_contains_controller_peer_config() {
+  get_source_config | jq -e --arg peer "$UTM_GATEWAY_PEER_URLS" --arg ip "$UTM_A_EASYTIER_IPV4" '
+    (((.config.peer_urls // []) | index($peer)) != null)
+    and (.config.virtual_ipv4 == $ip)
+    and (.config.proxy_forward_by_system == true)
+    and (.config.disable_p2p == true)
+  ' >/dev/null
+
+  get_exit_config | jq -e --arg peer "$UTM_GATEWAY_PEER_URLS" --arg ip "$UTM_B_EASYTIER_IPV4" '
+    (((.config.peer_urls // []) | index($peer)) != null)
+    and (.config.virtual_ipv4 == $ip)
+    and (.config.proxy_forward_by_system == true)
+    and (.config.disable_p2p == true)
+  ' >/dev/null
+}
+
+assert_b_route_uses_controller_relay() {
+  proxy_rpc "$UTM_B_MACHINE_ID" "api.instance.PeerManageRpcService" "ListRoute" "{}" | jq -e \
+    --arg cidr "$UTM_A_MANAGED_CIDRS" \
+    --arg relay "$UTM_C_RELAY_HOSTNAME" '
+      (.routes // []) as $routes
+      | ($routes | map(select(.hostname == $relay)) | first | .peer_id) as $relay_peer
+      | ($relay_peer != null)
+        and any($routes[];
+          (((.proxy_cidrs // []) | index($cidr)) != null)
+          and (.next_hop_peer_id == $relay_peer)
+          and (.feature_flag.disable_p2p == true)
+        )
+    ' >/dev/null
+}
+
+wait_tunnel_ping() {
+  local direction="$1"
+  local target="$2"
+
+  for _ in $(seq 1 20); do
+    if [ "$direction" = "a" ]; then
+      if ssh_a "ping -c 1 -W 2 '$target'" >/dev/null 2>&1; then
+        return 0
+      fi
+    else
+      if ssh_b "ping -c 1 -W 2 '$target'" >/dev/null 2>&1; then
+        return 0
+      fi
+    fi
+    sleep 1
+  done
+
+  if [ "$direction" = "a" ]; then
+    ssh_a "ping -c 3 -W 2 '$target'"
+  else
+    ssh_b "ping -c 3 -W 2 '$target'"
+  fi
+}
+
+wait_b_route_uses_controller_relay() {
+  for _ in $(seq 1 20); do
+    if assert_b_route_uses_controller_relay >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 1
+  done
+
+  assert_b_route_uses_controller_relay
 }
 
 assert_source_guard_active() {

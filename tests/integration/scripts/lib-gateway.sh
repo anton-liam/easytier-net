@@ -26,8 +26,13 @@ INTERNET_UDP_PORT="18080"
 A_UNDERLAY_IP="10.99.1.10"
 B_UNDERLAY_IP="10.99.1.3"
 C_UNDERLAY_IP="10.99.1.4"
+C_RELAY_URL="tcp://10.99.1.4:11010"
+C_RELAY_HOSTNAME="node-c"
 A_LAN_IP="10.99.2.254"
 CLIENT_D_IP="10.99.2.100"
+NETWORK_NAME="gateway-docker"
+NETWORK_SECRET="gateway-docker-secret"
+SOURCE_PEER_IP="10.126.126.2"
 
 compose() {
   "${COMPOSE[@]}" "$@"
@@ -43,7 +48,14 @@ policy_payload() {
   "ingress_iface": "$INGRESS_IFACE",
   "easytier_iface": "$EASYTIER_IFACE",
   "exit_peer_tun_ip": "$EXIT_PEER_IP",
-  "exit_wan_iface": "$EXIT_WAN_IFACE"
+  "exit_wan_iface": "$EXIT_WAN_IFACE",
+  "network_name": "$NETWORK_NAME",
+  "network_secret": "$NETWORK_SECRET",
+  "source_peer_tun_ip": "$SOURCE_PEER_IP",
+  "network_length": 24,
+  "peer_urls": ["$C_RELAY_URL"],
+  "disable_p2p": true,
+  "save_network": true
 }
 JSON
 }
@@ -242,6 +254,10 @@ get_source_config() {
   proxy_rpc "$A_MACHINE_ID" "api.config.ConfigRpcService" "GetConfig" "{}"
 }
 
+get_exit_config() {
+  proxy_rpc "$B_MACHINE_ID" "api.config.ConfigRpcService" "GetConfig" "{}"
+}
+
 get_gateway_status() {
   local machine_id="$1"
   curl -fsS \
@@ -258,6 +274,52 @@ assert_source_native_config() {
     and
     (((.config.exit_nodes // []) | index($exit)) != null)
   ' >/dev/null
+}
+
+assert_pair_network_config_uses_controller_peer() {
+  local source_config exit_config
+  source_config="$(get_source_config)"
+  exit_config="$(get_exit_config)"
+
+  echo "$source_config" | jq -e --arg peer "$C_RELAY_URL" --arg ip "$SOURCE_PEER_IP" '
+    (((.config.peer_urls // []) | index($peer)) != null)
+    and (.config.virtual_ipv4 == $ip)
+    and (.config.proxy_forward_by_system == true)
+    and (.config.disable_p2p == true)
+  ' >/dev/null
+
+  echo "$exit_config" | jq -e --arg peer "$C_RELAY_URL" --arg ip "$EXIT_PEER_IP" '
+    (((.config.peer_urls // []) | index($peer)) != null)
+    and (.config.virtual_ipv4 == $ip)
+    and (.config.proxy_forward_by_system == true)
+    and (.config.disable_p2p == true)
+  ' >/dev/null
+}
+
+assert_b_route_uses_controller_relay() {
+  local peer_json
+  peer_json="$(proxy_rpc "$B_MACHINE_ID" "api.instance.PeerManageRpcService" "ListRoute" "{}")"
+  echo "$peer_json" | jq -e --arg cidr "$MANAGED_CIDR" --arg relay "$C_RELAY_HOSTNAME" '
+    (.routes // []) as $routes
+    | ($routes | map(select(.hostname == $relay)) | first | .peer_id) as $relay_peer
+    | ($relay_peer != null)
+      and any($routes[];
+        (((.proxy_cidrs // []) | index($cidr)) != null)
+        and (.next_hop_peer_id == $relay_peer)
+        and (.feature_flag.disable_p2p == true)
+      )
+  ' >/dev/null
+}
+
+wait_b_route_uses_controller_relay() {
+  for _ in $(seq 1 20); do
+    if assert_b_route_uses_controller_relay >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 1
+  done
+
+  assert_b_route_uses_controller_relay
 }
 
 assert_source_native_config_removed() {
@@ -289,6 +351,17 @@ assert_b_has_return_route_hint() {
   echo "$peer_json" | jq -e --arg cidr "$MANAGED_CIDR" '
     tostring | contains($cidr)
   ' >/dev/null
+}
+
+wait_b_has_return_route_hint() {
+  for _ in $(seq 1 20); do
+    if assert_b_has_return_route_hint >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 1
+  done
+
+  assert_b_has_return_route_hint
 }
 
 ensure_udp_echo_server() {
