@@ -25,7 +25,11 @@ D(client) -> A(source/OpenWrt) -> EasyTier tunnel -> B(exit/OpenWrt) -> Internet
 - D -> A 本机访问不被策略捕获
 - A/B/C 控制面互联不因策略失联
 - 删除策略后 A/B 网络规则清理干净
-- EasyTier tunnel 异常时策略自动回滚
+- Source EasyTier tunnel 异常时进入 fail-closed guard，阻断 D 外联防止回落 A WAN
+- Exit EasyTier tunnel 异常时策略自动回滚
+- A 的 EasyTier 原生配置包含 `proxy_cidrs` 和 `exit_nodes`
+- B 能看到 D 子网的回程路由或 EasyTier route 视图
+- TCP/UDP/WebSocket/MTU 场景有明确验收记录
 
 暂不验证：
 - iStoreOS 镜像
@@ -235,9 +239,11 @@ POST /api/v1/gateway-policy/pair
 ```
 
 下发顺序要求：
-1. C 先下发 Exit 策略到 B
-2. C 再下发 Source 策略到 A
-3. 如果 A 下发失败，C 必须回滚 B
+1. C 先通过 `ConfigRpc/PatchConfig` 给 A 添加 `proxy_cidrs = managed_cidrs`
+2. C 再通过 `ConfigRpc/PatchConfig` 给 A 添加 `exit_nodes = exit_peer_tun_ip`
+3. C 下发 Exit 策略到 B
+4. C 下发 Source 策略到 A
+5. 任一步失败，C 必须按已完成步骤反向回滚
 
 ## 验收命令
 
@@ -269,6 +275,30 @@ curl -4 https://api.ipify.org
 预期：
 - 返回 IP 应表现为 B 的出口
 - 不能表现为 A 的出口
+
+### EasyTier 原生配置
+
+在 pair apply 后验证：
+
+```sh
+# 通过 Web proxy-rpc 查询 A 的 ConfigRpc/GetConfig
+curl -b cookie.json http://C:11211/api/v1/machines/<A_MACHINE_ID>/proxy-rpc
+
+# A 配置中应包含
+proxy_cidrs = ["192.168.128.0/24"]
+exit_nodes = ["<B_TUN_IP>"]
+```
+
+B 上验证 D 子网回程：
+
+```sh
+ip route show | grep 192.168.128.0/24 || true
+easytier-cli route list || true
+```
+
+预期：
+- B 能通过 EasyTier route 视图或系统路由识别 D 子网在 A 后面
+- 主路径不使用 `manual_routes`
 
 ### 本机访问不被捕获
 
@@ -308,6 +338,14 @@ nft list table inet easytier_gw
 ip rule show | grep 0x7e
 ip route show table 126
 ```
+
+A 的 table 126 应为：
+
+```sh
+default dev tun0
+```
+
+出口 peer 选择由 EasyTier `exit_nodes` 完成，不应再把 `via <B_TUN_IP>` 作为唯一语义。
 
 B 上应能看到：
 
@@ -361,23 +399,94 @@ nft list table inet easytier_gw
 - A/B 无 `inet easytier_gw` table
 - OpenWrt fw4 中无 `easytier_gw` comment 规则
 
-## 异常回滚验收
+## 回程抓包验收
+
+D 发起请求：
+
+```sh
+curl -4 --max-time 10 https://api.ipify.org
+```
+
+A 抓包：
+
+```sh
+tcpdump -ni br-lan host <D_IP>
+tcpdump -ni tun0 "host <D_IP> or net 192.168.128.0/24"
+```
+
+B 抓包：
+
+```sh
+tcpdump -ni tun0 net 192.168.128.0/24
+tcpdump -ni eth0 host <TEST_PUBLIC_IP>
+conntrack -L | grep <D_IP>
+```
+
+预期同一连接能观察到：
+
+```text
+D -> A br-lan -> A tun0 -> B tun0 -> B WAN
+B WAN reply -> B tun0 -> A tun0 -> A br-lan -> D
+```
+
+## UDP/WebSocket/MTU 验收
+
+UDP：
+
+```sh
+iperf3 -c <endpoint> -u -b 1M -t 10
+```
+
+WebSocket：
+
+```sh
+printf 'hello\n' | websocat -t wss://echo.websocket.events
+```
+
+MTU：
+
+```sh
+tracepath 1.1.1.1
+ping -M do -s 1200 -c 3 1.1.1.1
+ping -M do -s 1360 -c 3 1.1.1.1
+```
+
+预期：
+- UDP 不出现持续单向丢包
+- WebSocket 长连接能建立并持续收发
+- MTU 至少记录 1200/1360 两档结果，异常时回收为后续 `mtu` 参数建议
+
+## 异常 fail-closed 验收
 
 模拟 tunnel 异常：
 
 ```sh
-# A 上临时停止 easytier-core 或删除 tun0
-/etc/init.d/easytier stop
+# A 上临时 down tun0
+ip link set tun0 down
 ```
 
 预期：
 - `gateway_policy` run loop 检测 tunnel 异常
-- A 自动 cleanup
-- D 不应继续错误地被导向不可达 B
-- A/B/C 控制面恢复后可重新下发策略
+- A 删除 fwmark/ip route table 126
+- A 安装 `inet easytier_gw_guard`，阻断 `br-lan` 受管子网到外部的转发
+- D 不能继续通过 A 本地 WAN 出口泄漏
+- D -> A 本机、A -> C 控制面仍可达
+- tun0 恢复后可自动重新 apply，用户删除策略时 guard 必须被清理
+
+## 自动化脚本
+
+仓库内提供 UTM 验收脚本：
+
+```sh
+tests/utm/check-native-easytier-config.sh
+tests/utm/check-return-path.sh
+tests/utm/check-fail-closed.sh
+```
+
+脚本读取 `tests/utm/inventory.env`，用于记录 A/B/C/D IP、machine id、tunnel IP 和接口名。
 
 ## 当前注意事项
 
 - `016` 是 UTM 端到端验收计划，不是代码实现计划。
-- 代码实现以 `017-gateway-policy-minimal-downlink.zh.md` 为准。
-- Docker 集成测试后续应改为产品路径：Web REST -> RPC -> gateway_policy executor，而不是手写 nft/ip 命令。
+- 代码实现以 `017-gateway-policy-minimal-downlink.zh.md` 和 `018-easytier-native-capability-integration.zh.md` 为准。
+- Docker 集成测试走产品路径：Web REST -> RPC -> gateway_policy executor；UTM 负责真实 `tun0`、回程抓包和弱网验收。

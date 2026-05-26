@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**目标：** 基于 EasyTier 现有 WebClient/config-server 下发能力，实现可控的 D → A → B → Internet 出口转发策略。
+**目标：** 基于 EasyTier 现有 WebClient/config-server 下发能力，实现可控的 D → A → B → Internet 出口转发策略。当前最终口径以 `018-easytier-native-capability-integration.zh.md` 为补充：借用 EasyTier 原生 `proxy_cidrs` 负责回程，借用 `exit_nodes` 负责出口 peer 选择。
 
 **Architecture:** Web 控制台只暴露 `gateway_policy` 策略接口；A/B 的 `easytier-core -w` 通过现有控制通道接收策略；节点侧 gateway_policy 模块负责校验、执行 nft/route/NAT、健康检查和回滚。实现上允许 easytier-core 参与策略接收，但内部代码按协议、RPC、状态、执行、监控分层，避免污染 tunnel/peer/NAT 穿透核心逻辑。
 
@@ -17,8 +17,9 @@
 核心口径：
 - 控制面：`easytier-web` 新增 gateway policy REST API，通过已在线的 WebClient session 下发到目标 machine。
 - 节点面：`easytier-core` 注册 `GatewayPolicyRpc`，收到策略后调用内部 `gateway_policy` 模块执行。
-- 执行面：Source 节点只标记从 LAN 进入的受管流量；Exit 节点只做 tunnel 入站流量的转发和 masquerade。
-- 安全面：策略必须可重复下发、可撤销、进程退出可清理、隧道异常可回滚。
+- 执行面：Source 节点只标记从 LAN 进入的受管流量并把 fwmark 流量送入 EasyTier tun；Exit 节点只做 tunnel 入站流量的转发和 masquerade。
+- EasyTier 原生能力：pair apply 时同时给 Source 下发 `proxy_cidrs += managed_cidrs` 和 `exit_nodes += exit_peer_tun_ip`。
+- 安全面：策略必须可重复下发、可撤销、进程退出可清理；Source 隧道异常时进入 fail-closed guard，不允许 D 流量回落 A WAN。
 - 不做：不新增公网 HTTP agent、不改 EasyTier 加密认证、不改 tunnel/peer/NAT 穿透核心。
 
 ## 文件责任
@@ -71,7 +72,7 @@
 - [ ] Exit 必填：`managed_cidrs`、`exit_wan_iface`。
 - [ ] CIDR 与 IP 地址必须能解析。
 - [ ] 策略执行前先清理旧规则，避免重复下发导致 `File exists`。
-- [ ] Source route 使用 `ip route replace`，降低重复执行风险。
+- [ ] Source route 使用 `ip route replace default dev <easytier_iface> table 126`，降低重复执行风险；B 出口 peer 选择交给 EasyTier `exit_nodes`。
 - [ ] 执行失败后立即 cleanup，并把状态退回 Idle。
 
 ## Task 4: 监控与回滚
@@ -79,7 +80,9 @@
 - [ ] monitor 使用策略里的 `easytier_iface`，为空默认 `tun0`。
 - [ ] Source 检查 exit peer tunnel IP 可达。
 - [ ] Exit 至少检查 EasyTier tunnel 接口存在。
-- [ ] Applied 状态下隧道异常，执行 cleanup 并回到 Idle。
+- [ ] Applied 状态下 Exit 隧道异常，执行 cleanup 并回到 Idle。
+- [ ] Applied 状态下 Source 隧道异常，执行 cleanup 后安装 `easytier_gw_guard` drop 规则，状态进入 `DegradedGuarded`。
+- [ ] Source 隧道恢复后自动清理 guard 并重新 apply 策略。
 - [ ] C 暂时不可达但 tunnel 正常时保持当前策略，不主动清理。
 
 ## Task 5: Web API 口径
@@ -87,8 +90,8 @@
 - [ ] `POST /api/v1/gateway-policy/:machine-id` 下发完整策略。
 - [ ] `GET /api/v1/gateway-policy/:machine-id` 查询节点本地执行状态。
 - [ ] `DELETE /api/v1/gateway-policy/:machine-id` 删除节点策略。
-- [ ] `POST /api/v1/gateway-policy/pair` 一次指定 Source/Exit，按 Exit → Source 顺序下发，Source 失败时回滚 Exit。
-- [ ] `POST /api/v1/gateway-policy/pair/remove` 同时移除 Source/Exit 策略。
+- [ ] `POST /api/v1/gateway-policy/pair` 一次指定 Source/Exit，按 A 原生配置 → B Exit → A Source 顺序下发，失败时按已执行步骤反向回滚。
+- [ ] `POST /api/v1/gateway-policy/pair/remove` 同时移除 Source/Exit 策略，并清理 Source 原生 `proxy_cidrs` / `exit_nodes`。
 - [ ] Web API 只通过已认证登录用户和已连接 session 操作节点，不新增节点公网 API。
 
 ## Task 6: LuCI 进程显示
@@ -137,4 +140,5 @@ EASYTIER_CONFIG_SERVER=udp://137.220.194.19:22020/admin
 - D 到 A 本机的访问不被策略捕获。
 - A/B/C 控制面互联不被策略捕获。
 - D 的默认出网流量通过 A 的 LAN 进入，经 EasyTier tunnel 到 B，从 B 出口 NAT 出网。
-- 删除策略或隧道异常后，A/B 网络规则回到干净状态。
+- 用户删除策略或进程退出后，A/B 网络规则回到干净状态。
+- Source 策略 desired 仍存在但隧道异常时，D 外联被 fail-closed guard 阻断，不能回落 A WAN。

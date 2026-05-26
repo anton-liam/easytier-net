@@ -45,12 +45,20 @@ fi
 
 echo ""
 echo "--- Test 4: B forward counter increased ---"
-FWD_COUNT="$(compose exec -T node-b sh -c 'nft list chain inet easytier_gw forward 2>/dev/null | awk "/ip saddr/ {for (i=1; i<=NF; i++) if (\$i == \"packets\") {print \$(i+1); exit}}"')"
+FWD_COUNT="$(count_b_forward_packets)"
 FWD_COUNT="${FWD_COUNT:-0}"
 if [ "$FWD_COUNT" -gt 0 ]; then
   pass "B forwarded packets through gateway policy (packets=$FWD_COUNT)"
 else
   fail "B forward counter did not increase"
+fi
+
+echo ""
+echo "--- Test 5: Source native EasyTier config was patched ---"
+if assert_source_native_config; then
+  pass "A has proxy_cidrs and exit_nodes"
+else
+  fail "A native config is missing proxy_cidrs or exit_nodes"
 fi
 
 echo ""

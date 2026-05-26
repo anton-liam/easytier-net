@@ -1,4 +1,4 @@
-.PHONY: up down test test-forward test-rollback test-restore test-cleanup logs shell-a shell-b shell-c shell-d
+.PHONY: up down test test-forward test-native test-return-path test-fail-closed test-rollback test-restore test-cleanup logs shell-a shell-b shell-c shell-d
 
 export PATH := /Applications/Docker.app/Contents/Resources/bin:$(PATH)
 
@@ -10,10 +10,19 @@ up:
 down:
 	$(COMPOSE) down -v
 
-test: test-forward test-rollback test-restore test-cleanup
+test: test-forward test-native test-return-path test-fail-closed test-restore test-cleanup
 
 test-forward:
 	@bash scripts/test-gateway-forward.sh
+
+test-native:
+	@bash scripts/test-gateway-native-easytier.sh
+
+test-return-path:
+	@bash scripts/test-gateway-return-path.sh
+
+test-fail-closed:
+	@bash scripts/test-gateway-fail-closed.sh
 
 test-rollback:
 	@bash scripts/test-tunnel-down-rollback.sh

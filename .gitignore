@@ -5,3 +5,5 @@ dist/
 .worktrees/
 .playwright-mcp/
 vendor/
+tests/integration/.easytier-web.cookie
+tests/integration/.tcpdump-*.out

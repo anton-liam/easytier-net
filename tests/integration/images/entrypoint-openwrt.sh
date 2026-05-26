@@ -8,6 +8,13 @@ LAN_IFACE=${LAN_IFACE:-eth1}
 CONFIG_SERVER=${CONFIG_SERVER:-}
 MACHINE_ID=${MACHINE_ID:-}
 NODE_HOSTNAME=${NODE_HOSTNAME:-$(cat /proc/sys/kernel/hostname 2>/dev/null || echo openwrt-node)}
+NODE_NETWORK_NAME=${NODE_NETWORK_NAME:-gateway-docker}
+NODE_NETWORK_SECRET=${NODE_NETWORK_SECRET:-gateway-docker-secret}
+NODE_IPV4=${NODE_IPV4:-}
+NODE_PEERS=${NODE_PEERS:-}
+NODE_LISTENERS=${NODE_LISTENERS:-}
+NODE_DEV_NAME=${NODE_DEV_NAME:-tun0}
+DEFAULT_GW=${DEFAULT_GW:-}
 
 echo "[$(hostname)] starting... template=$DEVICE_TEMPLATE role=$ROLE"
 
@@ -25,12 +32,33 @@ fi
 
 ip addr show 2>/dev/null || true
 
+if [ -n "$DEFAULT_GW" ]; then
+  ip route replace default via "$DEFAULT_GW"
+  echo "[$NODE_HOSTNAME] default gw -> $DEFAULT_GW"
+fi
+
 if [ -n "$CONFIG_SERVER" ] && [ -x /usr/bin/easytier-core ]; then
   echo "[$(hostname)] starting easytier-core webclient -> $CONFIG_SERVER"
-  /usr/bin/easytier-core \
+  set -- /usr/bin/easytier-core \
     -w "$CONFIG_SERVER" \
+    --proxy-forward-by-system \
     --machine-id "$MACHINE_ID" \
-    --hostname "$NODE_HOSTNAME" &
+    --hostname "$NODE_HOSTNAME" \
+    --network-name "$NODE_NETWORK_NAME" \
+    --network-secret "$NODE_NETWORK_SECRET" \
+    --dev-name "$NODE_DEV_NAME"
+
+  if [ -n "$NODE_IPV4" ]; then
+    set -- "$@" --ipv4 "$NODE_IPV4"
+  fi
+  if [ -n "$NODE_PEERS" ]; then
+    set -- "$@" --peers "$NODE_PEERS"
+  fi
+  if [ -n "$NODE_LISTENERS" ]; then
+    set -- "$@" --listeners "$NODE_LISTENERS"
+  fi
+
+  "$@" &
   echo "$!" >/tmp/easytier-core.pid
 else
   echo "[$(hostname)] easytier-core not started (CONFIG_SERVER or binary missing)"

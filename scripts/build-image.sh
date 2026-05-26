@@ -153,15 +153,21 @@ USE_PROCD=1
 start_service() {
     local enabled
     local config_server
+    local proxy_forward_by_system
     config_load easytier
     config_get_bool enabled core enabled 0
     config_get config_server core config_server ''
+    config_get_bool proxy_forward_by_system core proxy_forward_by_system 1
 
     [ "\$enabled" = "1" ] || return
     [ -z \"\$config_server\" ] && return
 
     procd_open_instance
-    procd_set_param command /usr/bin/easytier-core -w \"\$config_server\"
+    if [ "\$proxy_forward_by_system" = "1" ]; then
+        procd_set_param command /usr/bin/easytier-core -w \"\$config_server\" --proxy-forward-by-system
+    else
+        procd_set_param command /usr/bin/easytier-core -w \"\$config_server\"
+    fi
     procd_set_param respawn
     procd_set_param stdout 1
     procd_set_param stderr 1
@@ -177,6 +183,7 @@ uci -q batch <<-EOT
     set easytier.core=easytier
     set easytier.core.enabled='$DEFAULT_ENABLED'
     set easytier.core.config_server='$DEFAULT_CONFIG_SERVER'
+    set easytier.core.proxy_forward_by_system='1'
     commit easytier
 EOT
 /etc/init.d/easytier enable
