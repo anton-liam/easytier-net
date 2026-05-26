@@ -7,3 +7,4 @@ dist/
 vendor/
 tests/integration/.easytier-web.cookie
 tests/integration/.tcpdump-*.out
+tests/utm/.utm-easytier-web.cookie

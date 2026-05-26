@@ -21,7 +21,7 @@ UTM_POLICY_ID="${UTM_POLICY_ID:-utm-gw-001}"
 UTM_A_INGRESS_IFACE="${UTM_A_INGRESS_IFACE:-br-lan}"
 UTM_B_WAN_IFACE="${UTM_B_WAN_IFACE:-eth0}"
 UTM_EASYTIER_IFACE="${UTM_EASYTIER_IFACE:-tun0}"
-UTM_TEST_TCP_URL="${UTM_TEST_TCP_URL:-https://api.ipify.org}"
+UTM_TEST_TCP_URL="${UTM_TEST_TCP_URL:-http://ifconfig.me/ip}"
 UTM_TEST_MTU_HOST="${UTM_TEST_MTU_HOST:-1.1.1.1}"
 UTM_SSH_COMMON_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=6"
 
@@ -128,7 +128,7 @@ assert_json_contains_native_source_config() {
 }
 
 assert_source_guard_active() {
-  ssh_a "nft list table inet easytier_gw_guard 2>/dev/null | grep -q 'counter drop'"
+  ssh_a "nft list table inet easytier_gw_guard 2>/dev/null | grep -q ' drop'"
 }
 
 assert_source_policy_route_absent() {

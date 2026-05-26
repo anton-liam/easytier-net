@@ -8,6 +8,10 @@ source "$(dirname "$0")/lib-utm.sh"
 TMP_DIR="${TMP_DIR:-/tmp/easytier-utm-return-path}"
 mkdir -p "$TMP_DIR"
 
+count_b_gateway_forward_packets() {
+  ssh_b "nft list chain inet easytier_gw forward 2>/dev/null | awk '/ip saddr/ {for (i=1; i<=NF; i++) if (\$i == \"packets\") sum += \$(i+1)} END {print sum + 0}'"
+}
+
 print_section "Web 登录与 pair apply"
 login_web
 remove_pair_policy >/dev/null 2>&1 || true
@@ -39,10 +43,10 @@ ssh_d "command -v websocat >/dev/null 2>&1 && printf 'easytier-websocket-check\n
 ssh_d "command -v iperf3 >/dev/null 2>&1 && iperf3 -c iperf3.iperf.fr -u -b 1M -t 5 || true"
 
 print_section "D -> A 本机不被捕获"
-BEFORE="$(ssh_b "nft list chain inet easytier_gw postrouting 2>/dev/null | awk '/masquerade/ {for (i=1; i<=NF; i++) if (\\\$i == \"packets\") print \\\$(i+1)}' | awk '{s+=\\\$1} END {print s+0}'")"
+BEFORE="$(count_b_gateway_forward_packets)"
 ssh_d "ping -c 3 -W 2 '$UTM_A_LAN_IP'"
-AFTER="$(ssh_b "nft list chain inet easytier_gw postrouting 2>/dev/null | awk '/masquerade/ {for (i=1; i<=NF; i++) if (\\\$i == \"packets\") print \\\$(i+1)}' | awk '{s+=\\\$1} END {print s+0}'")"
-echo "B NAT counter around D->A local: $BEFORE -> $AFTER"
+AFTER="$(count_b_gateway_forward_packets)"
+echo "B forward counter around D->A local: $BEFORE -> $AFTER"
 test "$BEFORE" = "$AFTER"
 
 echo "UTM return-path check passed"
