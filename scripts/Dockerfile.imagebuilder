@@ -1,0 +1,32 @@
+# Prebuilt OpenWrt ImageBuilder runtime.
+# Build once and reuse to avoid installing ImageBuilder host dependencies on
+# every firmware image build.
+
+FROM debian:bookworm-slim
+
+ARG HTTP_PROXY
+ARG HTTPS_PROXY
+ARG ALL_PROXY
+ENV http_proxy=${HTTP_PROXY} https_proxy=${HTTPS_PROXY} all_proxy=${ALL_PROXY}
+
+RUN if [ -z "$HTTP_PROXY" ]; then \
+      sed -i 's|http://deb.debian.org|http://mirrors.tuna.tsinghua.edu.cn|g' /etc/apt/sources.list.d/debian.sources 2>/dev/null || true; \
+    fi
+
+RUN apt-get update -qq && \
+    apt-get install -y -qq --no-install-recommends \
+      wget \
+      zstd \
+      build-essential \
+      libncurses-dev \
+      gawk \
+      unzip \
+      file \
+      python3 \
+      ca-certificates \
+    >/dev/null && \
+    rm -rf /var/lib/apt/lists/*
+
+ENV http_proxy= https_proxy= all_proxy=
+
+WORKDIR /work

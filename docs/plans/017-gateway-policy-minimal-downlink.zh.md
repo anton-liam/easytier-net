@@ -118,6 +118,8 @@
 
 本机 native 构建使用 EasyTier 仓库内的 `rust-toolchain.toml`，不要在项目根目录强制设置 `RUSTUP_TOOLCHAIN=1.95.0`，避免触发额外 toolchain 下载。
 
+OpenWrt 镜像构建使用 `build/imagebuilder/<target>/` 缓存 ImageBuilder 压缩包，并使用 `build/imagebuilder/<target>/dl/` 缓存 OpenWrt 包下载。实际解压和构建在容器内 `/tmp/ib` 完成，避免 macOS 非大小写敏感文件系统导致 OpenWrt prereq 检查失败。首次缺少 `easytier-openwrt-builder:debian12` 时，脚本会自动构建专用 ImageBuilder 容器，后续复用该容器环境。
+
 ## OpenWrt 镜像默认直连
 
 镜像构建脚本读取仓库根目录 `.env`，通过 `EASYTIER_CONFIG_SERVER` 注入首次启动配置：

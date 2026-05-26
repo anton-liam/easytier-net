@@ -169,6 +169,8 @@ EASYTIER_CONFIG_SERVER=udp://192.168.64.4:22020/admin
 
 `.env` 不进入 git；示例见 `.env.example`。
 
+`build-image.sh` 会把每个设备的 OpenWrt ImageBuilder 压缩包缓存在 `build/imagebuilder/<target>/`，并把 OpenWrt 包下载缓存保留在 `build/imagebuilder/<target>/dl/`。首次构建会下载 ImageBuilder 和 ipk 包，后续同一 target 会复用缓存；实际解压和构建仍在容器内 `/tmp/ib` 完成，避免 macOS 非大小写敏感文件系统触发 OpenWrt prereq 失败。脚本会在首次缺少 `easytier-openwrt-builder:debian12` 时自动构建专用 ImageBuilder 容器，避免每次镜像打包都重复安装宿主依赖。
+
 ## 部署步骤
 
 ### 1. 部署 C
