@@ -4,7 +4,7 @@
 
 **目标：** 基于 EasyTier 现有 WebClient/config-server 下发能力，实现可控的 D → A → B → Internet 出口转发策略。当前最终口径以 `018-easytier-native-capability-integration.zh.md` 为补充：借用 EasyTier 原生 `proxy_cidrs` 负责回程，借用 `exit_nodes` 负责出口 peer 选择。
 
-**Architecture:** Web 控制台只暴露 `gateway_policy` 策略接口；A/B 的 `easytier-core -w` 通过现有控制通道接收策略；节点侧 gateway_policy 模块负责校验、执行 nft/route/NAT、健康检查和回滚。实现上允许 easytier-core 参与策略接收，但内部代码按协议、RPC、状态、执行、监控分层，避免污染 tunnel/peer/NAT 穿透核心逻辑。
+**Architecture:** Web 控制台暴露 `gateway_policy` 策略接口；A/B 的 `easytier-core -w` 通过现有控制通道接收基础组网配置和策略。pair API 先下发 `peer_urls=[C]` 的 EasyTier network config，再下发 gateway policy；节点侧 gateway_policy 模块负责校验、执行 nft/route/NAT、健康检查和回滚。实现上允许 easytier-core 参与策略接收，但内部代码按协议、RPC、状态、执行、监控分层，避免污染 tunnel/peer/NAT 穿透核心逻辑。
 
 **Tech Stack:** Rust, prost/protobuf, EasyTier RPC/config-server, tokio, nftables, iproute2, LuCI Lua1, Docker/UTM 验证。
 
@@ -96,8 +96,8 @@
 
 ## Task 6: LuCI 进程显示
 
-- [ ] 保留原生 luci-app-easytier 的 core 配置体验。
-- [ ] 补齐 `easytier-core-webclient` 的启动/停止/状态展示。
+- [x] 镜像打包复制原生 luci-app-easytier 的页面/controller/view，但不覆盖项目自己的最小 procd 服务脚本。
+- [x] 补齐 `easytier-core-webclient` 的启动/停止/状态展示，LuCI 中显示为 `Web Console Managed Core`。
 - [ ] 如果最终不再需要独立 agent，则不在 UI 中展示 agent，避免误导。
 
 ## Task 7: 验证
@@ -131,11 +131,22 @@ OpenWrt 镜像构建使用 `build/imagebuilder/<target>/` 缓存 ImageBuilder �
 EASYTIER_CONFIG_SERVER=udp://137.220.194.19:22020/admin
 ```
 
-`.env` 不进入 git。未配置该变量时，镜像保留 EasyTier 服务但默认不启动连接。
+`.env` 不进入 git。未配置该变量时，镜像保留 EasyTier 服务但默认不启动连接。配置后写入 `easytier_webclient.main.config_server` 并启用 `easytier-core-webclient`，本地 `easytier` core 默认保持关闭。
+
+## LuCI 依赖来源
+
+当前不二开 LuCI 功能代码，只把 LuCI fork 作为可复现 submodule 依赖锚点。新环境先初始化依赖：
+
+```sh
+git submodule update --init --recursive
+```
+
+镜像脚本按 `vendor/EasyTier` 同样的 submodule 模型处理 LuCI：优先使用 `vendor/luci-app-easytier/luci-app-easytier`；缺失时提示初始化 submodule，不自动 clone 远端分支。如需使用其他本地 LuCI checkout，可通过 `EASYTIER_LUCI_APP_DIR` 指向包含 `luasrc/` 的 LuCI package 目录。
 
 ## 验收标准
 
 - A/B 节点能在 Device List 中保持原生 EasyTier 在线管理能力。
+- A/B 的基础组网 `peer_urls` 由 C 下发并指向 C relay，不要求设备镜像写死对端 B。
 - Web 控制台能对在线节点下发 Source/Exit 策略。
 - D 到 A 本机的访问不被策略捕获。
 - A/B/C 控制面互联不被策略捕获。

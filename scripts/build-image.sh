@@ -13,6 +13,9 @@ PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 DIST_DIR="$PROJECT_DIR/dist/images"
 CACHE_DIR="$PROJECT_DIR/build/imagebuilder/$TARGET"
 EASYTIER_BIN="$PROJECT_DIR/dist/aarch64/easytier-core"
+INCLUDE_LUCI_APP="${EASYTIER_INCLUDE_LUCI:-1}"
+LUCI_APP_VENDOR_DIR="${EASYTIER_LUCI_APP_VENDOR_DIR:-$PROJECT_DIR/vendor/luci-app-easytier}"
+LUCI_APP_DIR="${EASYTIER_LUCI_APP_DIR:-$LUCI_APP_VENDOR_DIR/luci-app-easytier}"
 IMAGEBUILDER_DOCKER_IMAGE="${EASYTIER_IMAGEBUILDER_DOCKER_IMAGE:-easytier-openwrt-builder:debian12}"
 IMAGEBUILDER_DOCKERFILE="$PROJECT_DIR/scripts/Dockerfile.imagebuilder"
 
@@ -31,11 +34,32 @@ fi
 
 mkdir -p "$DIST_DIR" "$CACHE_DIR"
 
+resolve_luci_app_dir() {
+  [ "$INCLUDE_LUCI_APP" = "1" ] || return 0
+
+  if [ -d "$LUCI_APP_DIR/luasrc" ]; then
+    return 0
+  fi
+
+  if [ -n "${EASYTIER_LUCI_APP_DIR:-}" ]; then
+    echo "ERROR: EASYTIER_LUCI_APP_DIR does not point to a LuCI package directory: $LUCI_APP_DIR" >&2
+    echo "Expected a directory containing luasrc/." >&2
+    exit 1
+  fi
+
+  echo "ERROR: luci-app-easytier submodule is not initialized: $LUCI_APP_DIR" >&2
+  echo "Run: git submodule update --init --recursive" >&2
+  echo "Or set EASYTIER_LUCI_APP_DIR to a package directory containing luasrc/." >&2
+  exit 1
+}
+
 # Check that easytier-core aarch64 binary exists
 if [ ! -f "$EASYTIER_BIN" ]; then
   echo "ERROR: $EASYTIER_BIN not found. Run 'make build-openwrt' first."
   exit 1
 fi
+
+resolve_luci_app_dir
 
 if ! docker image inspect "$IMAGEBUILDER_DOCKER_IMAGE" >/dev/null 2>&1; then
   if [ -f "$IMAGEBUILDER_DOCKERFILE" ]; then
@@ -90,9 +114,11 @@ docker run --rm \
   -v "$DIST_DIR":/dist \
   -v "$CACHE_DIR":/cache \
   -v "$EASYTIER_BIN":/tmp/easytier-core:ro \
+  -v "$LUCI_APP_DIR":/tmp/luci-app-easytier:ro \
   -v "$PROJECT_DIR/targets/$TARGET":/tmp/target-files:ro \
   -e HOST_UID="$(id -u)" \
   -e HOST_GID="$(id -g)" \
+  -e EASYTIER_INCLUDE_LUCI="$INCLUDE_LUCI_APP" \
   --platform linux/amd64 \
   "$IMAGEBUILDER_DOCKER_IMAGE" \
   bash -c "
@@ -132,10 +158,50 @@ docker run --rm \
     mkdir -p files/usr/bin
     mkdir -p files/etc/init.d
     mkdir -p files/etc/uci-defaults
+    mkdir -p files/etc/config
+    mkdir -p files/etc/easytier
 
     # Copy easytier binary
     cp /tmp/easytier-core files/usr/bin/easytier-core
     chmod +x files/usr/bin/easytier-core
+
+    # Install LuCI pages without replacing our minimal service scripts.
+    # The image keeps the productized webclient service as the default entry.
+    if [ \"\$EASYTIER_INCLUDE_LUCI\" = \"1\" ]; then
+      mkdir -p files/usr/lib/lua/luci/controller
+      mkdir -p files/usr/lib/lua/luci/model/cbi
+      mkdir -p files/usr/lib/lua/luci/view
+      cp -r /tmp/luci-app-easytier/luasrc/controller/* files/usr/lib/lua/luci/controller/
+      cp -r /tmp/luci-app-easytier/luasrc/model/* files/usr/lib/lua/luci/model/
+      cp -r /tmp/luci-app-easytier/luasrc/view/* files/usr/lib/lua/luci/view/
+
+      if [ -d /tmp/luci-app-easytier/root/usr/share/easytier ]; then
+        mkdir -p files/usr/share
+        cp -r /tmp/luci-app-easytier/root/usr/share/easytier files/usr/share/
+      fi
+      if [ -f /tmp/luci-app-easytier/root/usr/share/rpcd/acl.d/luci-app-easytier.json ]; then
+        mkdir -p files/usr/share/rpcd/acl.d
+        cp /tmp/luci-app-easytier/root/usr/share/rpcd/acl.d/luci-app-easytier.json files/usr/share/rpcd/acl.d/
+      fi
+      if [ -f /tmp/luci-app-easytier/root/etc/easytier/config.toml ]; then
+        cp /tmp/luci-app-easytier/root/etc/easytier/config.toml files/etc/easytier/config.toml
+      fi
+
+      cat > files/usr/share/rpcd/acl.d/luci-app-easytier-webclient.json <<'ACLEOF'
+{
+  "luci-app-easytier-webclient": {
+    "description": "Grant UCI access for EasyTier webclient service",
+    "read": {
+      "uci": [ "easytier", "easytier_webclient", "easytier_agent" ],
+      "cgi-io": [ "upload" ]
+    },
+    "write": {
+      "uci": [ "easytier", "easytier_webclient", "easytier_agent" ]
+    }
+  }
+}
+ACLEOF
+    fi
 
     # Copy target-specific files if they exist
     if [ -d /tmp/target-files/files ]; then
@@ -153,12 +219,15 @@ USE_PROCD=1
 start_service() {
     local enabled
     local config_server
+    local web_config
     local proxy_forward_by_system
     config_load easytier
     config_get_bool enabled core enabled 0
     config_get config_server core config_server ''
+    config_get web_config core web_config ''
     config_get_bool proxy_forward_by_system core proxy_forward_by_system 1
 
+    [ -n "\$config_server" ] || config_server="\$web_config"
     [ "\$enabled" = "1" ] || return
     [ -z \"\$config_server\" ] && return
 
@@ -176,17 +245,66 @@ start_service() {
 INITEOF
     chmod +x files/etc/init.d/easytier
 
-    # UCI defaults: enable easytier on first boot
+    # Web-console managed core service. LuCI status uses this service name
+    # to expose a dedicated process switch for easytier-core -w.
+    cat > files/etc/init.d/easytier-core-webclient <<'WEBCLIENTEOF'
+#!/bin/sh /etc/rc.common
+
+START=99
+STOP=10
+USE_PROCD=1
+
+start_service() {
+    local enabled
+    local config_server
+    local proxy_forward_by_system
+    config_load easytier_webclient
+    config_get_bool enabled main enabled 0
+    config_get config_server main config_server ''
+    config_get_bool proxy_forward_by_system main proxy_forward_by_system 1
+
+    [ "\$enabled" = "1" ] || return
+    [ -z "\$config_server" ] && return
+
+    procd_open_instance
+    if [ "\$proxy_forward_by_system" = "1" ]; then
+        procd_set_param command /bin/sh -c 'date +%s > /tmp/easytier_time; exec "\$@"' easytier-webclient /usr/bin/easytier-core -w "\$config_server" --proxy-forward-by-system
+    else
+        procd_set_param command /bin/sh -c 'date +%s > /tmp/easytier_time; exec "\$@"' easytier-webclient /usr/bin/easytier-core -w "\$config_server"
+    fi
+    procd_set_param respawn
+    procd_set_param stdout 1
+    procd_set_param stderr 1
+    procd_close_instance
+}
+WEBCLIENTEOF
+    chmod +x files/etc/init.d/easytier-core-webclient
+
+    # UCI defaults: keep local core disabled and enable webclient mode when
+    # EASYTIER_CONFIG_SERVER is provided by .env.
     cat > files/etc/uci-defaults/99-easytier <<'UCIEOF'
 #!/bin/sh
 uci -q batch <<-EOT
     set easytier.core=easytier
-    set easytier.core.enabled='$DEFAULT_ENABLED'
-    set easytier.core.config_server='$DEFAULT_CONFIG_SERVER'
+    set easytier.core.enabled='0'
+    set easytier.core.etcmd='web'
+    set easytier.core.web_config='$DEFAULT_CONFIG_SERVER'
+    set easytier.core.config_server=''
     set easytier.core.proxy_forward_by_system='1'
+    set easytier.core.easytierbin='/usr/bin/easytier-core'
+    set easytier.core.tunname='tun0'
+    set easytier.core.dev_name='tun0'
+    set easytier.core.web_enabled='0'
+    set easytier_webclient.main=easytier_webclient
+    set easytier_webclient.main.enabled='$DEFAULT_ENABLED'
+    set easytier_webclient.main.config_server='$DEFAULT_CONFIG_SERVER'
+    set easytier_webclient.main.proxy_forward_by_system='1'
     commit easytier
+    commit easytier_webclient
 EOT
 /etc/init.d/easytier enable
+/etc/init.d/easytier-core-webclient enable
+[ '$DEFAULT_ENABLED' = '1' ] && /etc/init.d/easytier-core-webclient start
 exit 0
 UCIEOF
     chmod +x files/etc/uci-defaults/99-easytier
@@ -194,7 +312,7 @@ UCIEOF
     # Build image
     echo '--- Building image ---'
     make image PROFILE='$PROFILE' FILES=files \
-      PACKAGES='nftables ip-full kmod-nft-nat kmod-tun luci luci-base uhttpd curl ca-bundle'
+      PACKAGES='nftables ip-full kmod-nft-nat kmod-tun luci luci-base luci-compat luci-lib-jsonc uhttpd cgi-io curl ca-bundle'
 
     # Copy output with deterministic preference for squashfs sysupgrade images.
     echo '--- ImageBuilder outputs ---'

@@ -4,7 +4,9 @@ build/
 dist/
 .worktrees/
 .playwright-mcp/
-vendor/
+vendor/*
+!vendor/EasyTier
+!vendor/luci-app-easytier
 tests/integration/.easytier-web.cookie
 tests/integration/.tcpdump-*.out
 tests/utm/.utm-easytier-web.cookie

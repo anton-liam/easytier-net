@@ -10,7 +10,8 @@
 ## 项目目标
 
 在 EasyTier 组网基础上，实现 D → A → B → Internet 的出口网关策略编排。
-C 作为控制面，通过 EasyTier 已有通道下发策略。Web pair API 同时下发 EasyTier 原生配置和 `gateway_policy`：
+C 作为控制面和搭线 relay，通过 EasyTier 已有 WebClient/config-server 通道编排 A/B。A/B 默认只用 `-w` 注册到 C，Web pair API 先下发基础组网配置，再下发出口策略：
+- `peer_urls`：A/B 的 EasyTier 组网入口，默认指向 C 的 relay listener
 - `proxy_cidrs`：A 声明 D 子网，供 B 获得回程路径
 - `exit_nodes`：A 指定 B 的 tunnel IP 作为 EasyTier 出口 peer
 - `gateway_policy Source`：A 只选择 D 子网出口流量进入 EasyTier，并在异常时 fail-closed
@@ -114,7 +115,7 @@ Gateway 模块根据设备角色（source/exit）决定行为，不需要暴露�
 |------|----------|------|------|------|------|
 | A | NanoPi R3S (dualport) | OpenWrt | Source 网关 | WAN(eth0) + LAN(eth1/br-lan) | easytier-core + gateway 模块 |
 | B | RPi4/5 或 R3S (singleport/dualport) | OpenWrt | Exit 网关（旁路由） | eth0（接入 WAN） | easytier-core + gateway 模块 |
-| C | 通用 x86/arm | Ubuntu | 控制面 | eth0 | easytier-web + config-server + relay |
+| C | 通用 x86/arm | Ubuntu | 控制面/relay | eth0 | easytier-web + config-server + easytier-core relay |
 | D | 任意 | Ubuntu | 客户端 | eth0（连 A LAN） | 无，仅作为流量源 |
 
 ### 网络划分
@@ -123,7 +124,7 @@ Gateway 模块根据设备角色（source/exit）决定行为，不需要暴露�
 |------|------|------|------|
 | underlay | 192.168.64.0/24 | A/B/C 物理互联（WAN 侧） | A(WAN), B(eth0), C(eth0) |
 | lan_a | 192.168.1.0/24 | D 连接 A 的 LAN 口 | A(LAN), D |
-| tunnel | 10.126.126.0/24 | EasyTier 虚拟网络 | A(tun0), B(tun0), C(tun0) |
+| tunnel | 10.126.126.0/24 | EasyTier 虚拟网络 | A(tun0), B(tun0)，C 可作为 no-tun relay |
 | wan_b | NAT / 公网 | B 出口到 Internet | B(eth0 出向) |
 
 ## 流量路径
@@ -166,11 +167,34 @@ Internet reply
 
 ### 通道
 
-复用 EasyTier 已有的 config-server 加密通道。C 的 easytier-web 通过 config-server 下发策略到 A/B 的 easytier-core gateway 模块。不需要额外的 HTTP API 或认证机制。
+复用 EasyTier 已有的 config-server 加密通道。C 的 easytier-web 通过 config-server 下发基础组网配置和策略到 A/B 的 easytier-core。不需要额外的 HTTP API 或认证机制。
+
+### 启动和组网模型
+
+A/B 镜像默认只需要启动 WebClient。OpenWrt 镜像中该进程由独立 procd 服务 `easytier-core-webclient` 托管，LuCI 状态页显示为 `Web Console Managed Core`；原生 `easytier` local core 默认关闭，避免双进程抢同一个节点身份：
+
+```sh
+easytier-core -w udp://C:22020/admin
+```
+
+Web pair API 在策略前先下发 EasyTier network config：
+
+```json
+{
+  "network_name": "gateway",
+  "network_secret": "secret",
+  "peer_urls": ["udp://C:11010"],
+  "virtual_ipv4": "10.126.126.x",
+  "dev_name": "tun0",
+  "proxy_forward_by_system": true
+}
+```
+
+`peer_urls` 等价于 CLI `-p/--peers`，但由 Web 控制台通过 WebClient 下发。C 可以不注册到 Device List；C 作为本地 relay/control 基础设施存在，Device List 默认只管理 A/B 等客户端设备。
 
 ### 策略模型
 
-C 下发到 A/B 的策略是一个简单结构：
+C 下发到 A/B 的 pair 请求包含基础组网字段和出口策略字段：
 
 ```json
 {
@@ -181,15 +205,20 @@ C 下发到 A/B 的策略是一个简单结构：
   "managed_cidrs": ["192.168.1.0/24"],
   "ingress_iface": "br-lan",
   "easytier_iface": "tun0",
+  "source_peer_tun_ip": "10.126.126.2",
   "exit_peer_tun_ip": "10.126.126.3",
-  "exit_wan_iface": "eth0"
+  "exit_wan_iface": "eth0",
+  "network_name": "gateway",
+  "network_secret": "secret",
+  "peer_urls": ["udp://C:11010"]
 }
 ```
 
 pair apply 的顺序必须是：
-1. 对 A 下发 EasyTier 原生配置：`proxy_cidrs += managed_cidrs`，`exit_nodes += exit_peer_tun_ip`
-2. 对 B 下发 `GatewayRole::Exit`
-3. 对 A 下发 `GatewayRole::Source`
+1. 对 A/B 下发 EasyTier 基础组网配置：`peer_urls = [C]`，并使用稳定 instance id 覆盖同一实例
+2. 对 A 下发 EasyTier 原生配置：`proxy_cidrs += managed_cidrs`，`exit_nodes += exit_peer_tun_ip`
+3. 对 B 下发 `GatewayRole::Exit`
+4. 对 A 下发 `GatewayRole::Source`
 
 失败时按已执行步骤反向回滚，避免只完成半边策略。
 
@@ -318,6 +347,7 @@ cleanup_all_rules();  // 删除 nft table + ip rule + ip route
 - 扩展 proto 消息（添加 GatewayPolicy）
 - web_client 收到 policy 后分发给 gateway 模块
 - easytier-web 策略 CRUD
+- easytier-web pair API 通过 `RunNetworkInstance` 下发 `peer_urls=[C]` 的基础组网配置
 - easytier-web pair API 通过 `ConfigRpc/PatchConfig` 下发 `proxy_cidrs` 和 `exit_nodes`
 
 ### 禁止改动
@@ -395,6 +425,10 @@ OpenWrt 镜像默认服务参数：
 ```sh
 easytier-core -w "$config_server" --proxy-forward-by-system
 ```
+
+镜像打包只注入 `luci-app-easytier` 的 LuCI 页面、controller、view 和安全辅助文件，不覆盖项目自己的最小 procd 服务脚本。LuCI 源码目前不二开，按 `vendor/EasyTier` 同样的 submodule 模型管理：外层仓库记录 `vendor/EasyTier` 和 `vendor/luci-app-easytier` 的精确 commit。新环境需要执行 `git submodule update --init --recursive`；构建脚本优先使用 `vendor/luci-app-easytier/luci-app-easytier`，缺失时直接报错，不自动拉取远端 `main`。可用 `EASYTIER_LUCI_APP_VENDOR_DIR` 或 `EASYTIER_LUCI_APP_DIR` 覆盖，其中 `EASYTIER_LUCI_APP_DIR` 必须指向包含 `luasrc/` 的 LuCI package 目录。
+
+`EASYTIER_CONFIG_SERVER` 写入 `easytier_webclient.main.config_server`；未配置时服务保留但默认不启动。
 
 `proxy_forward_by_system` 是设备基础默认能力，写入 UCI 配置，不作为 gateway policy 每次动态 patch 的字段。`manual_routes` 不写入镜像默认配置。
 

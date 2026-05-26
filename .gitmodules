@@ -1,0 +1,8 @@
+[submodule "vendor/EasyTier"]
+	path = vendor/EasyTier
+	url = https://github.com/anton-liam/EasyTier-net-fork.git
+	branch = new
+[submodule "vendor/luci-app-easytier"]
+	path = vendor/luci-app-easytier
+	url = https://github.com/anton-liam/easytier-net-luci-fork.git
+	branch = main
